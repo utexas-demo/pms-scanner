@@ -1,0 +1,8 @@
+services:
+  pms-scanner:
+    build: .
+    restart: unless-stopped
+    volumes:
+      - ./incoming:/data/incoming   # host folder → container watch dir
+    env_file:
+      - .env

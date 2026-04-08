@@ -62,6 +62,7 @@ python -m scanner
 | `FILE_SETTLE_SECONDS` | No | `0.5` | Delay after detection before upload (seconds) |
 | `UPLOAD_TIMEOUT_SECONDS` | No | `30` | HTTP request timeout per attempt (seconds) |
 | `LOG_LEVEL` | No | `INFO` | Log verbosity: `DEBUG` \| `INFO` \| `WARNING` \| `ERROR` |
+| `DASHBOARD_PORT` | No | `8080` | Port for the upload progress dashboard HTTP server |
 
 > **Security**: `API_TOKEN` is transmitted only in the `Authorization: Bearer` header. It is never stored in source code, Docker image layers, or log output (logs show only the first 4 characters).
 
@@ -84,6 +85,40 @@ volumes:
 ```
 
 Or set `WATCH_DIR` as an environment variable when running natively (without Docker).
+
+---
+
+## Upload Progress Dashboard
+
+The service includes a real-time browser dashboard that shows upload status for all files detected in the current session.
+
+**URL**: `http://localhost:{DASHBOARD_PORT}` (default `http://localhost:8080`)
+
+The dashboard updates automatically via Server-Sent Events — no manual refresh needed. Each file shows its status (`pending` → `uploading` → `success` / `failed`), number of attempts, and error details for failures.
+
+### Docker port mapping
+
+Add to `docker-compose.yml` under the `pms-scanner` service:
+
+```yaml
+ports:
+  - "${DASHBOARD_PORT:-8080}:8080"
+```
+
+And in `Dockerfile`:
+
+```dockerfile
+EXPOSE 8080
+```
+
+### API endpoints
+
+| Endpoint | Description |
+|----------|-------------|
+| `GET /` | Dashboard HTML page |
+| `GET /health` | Readiness probe — returns `{"status": "ok"}` |
+| `GET /api/files` | JSON snapshot of all tracked files |
+| `GET /api/events` | SSE stream of real-time status updates |
 
 ---
 

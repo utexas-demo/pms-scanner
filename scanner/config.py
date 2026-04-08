@@ -33,5 +33,8 @@ class Settings(BaseSettings):
     # Logging level: DEBUG | INFO | WARNING | ERROR
     log_level: str = "INFO"
 
+    # Port for the upload progress dashboard HTTP server
+    dashboard_port: int = 8080
+
 
 settings = Settings()  # type: ignore[call-arg]

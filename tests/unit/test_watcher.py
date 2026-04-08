@@ -1,5 +1,6 @@
 """Unit tests for scanner/watcher.py — TDD: new-behaviour tests must FAIL first."""
 
+from datetime import UTC, datetime
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -287,3 +288,204 @@ class TestWorkerFileDisposition:
         assert not (tmp_processed_dir / "scan.jpg").exists(), (
             "File must NOT be in processed/ after failure"
         )
+
+
+# ---------------------------------------------------------------------------
+# T008: Watcher ↔ StatusStore integration (US1)
+# ---------------------------------------------------------------------------
+
+
+class TestWatcherStoreIntegration:
+    def test_handler_adds_pending_record(self, tmp_path: Path) -> None:
+        """ImageEventHandler._handle() must call status_store.add() with PENDING status."""
+        import queue
+        from unittest.mock import patch
+
+        from watchdog.events import FileCreatedEvent
+
+        from scanner.store import StatusStore
+
+        img = tmp_path / "scan.jpg"
+        img.write_bytes(b"\xff\xd8\xff" + b"\x00" * 10)
+        store = StatusStore()
+
+        with (
+            patch("scanner.watcher.settings") as mock_cfg,
+            patch("scanner.watcher.status_store", store),
+        ):
+            mock_cfg.watch_dir = str(tmp_path)
+            from scanner.watcher import ImageEventHandler, QueueItem
+
+            q: queue.Queue[QueueItem] = queue.Queue()
+            handler = ImageEventHandler(upload_queue=q)
+            handler.on_created(FileCreatedEvent(str(img)))
+
+        records = store.all()
+        assert len(records) == 1
+        assert records[0].filename == "scan.jpg"
+        assert records[0].status.value == "pending"
+
+    def test_queue_item_carries_record_id(self, tmp_path: Path) -> None:
+        """Queue items must be QueueItem namedtuples carrying both path and record_id."""
+        import queue
+        from unittest.mock import patch
+
+        from watchdog.events import FileCreatedEvent
+
+        from scanner.store import StatusStore
+
+        img = tmp_path / "scan.jpg"
+        img.write_bytes(b"\xff\xd8\xff" + b"\x00" * 10)
+        store = StatusStore()
+
+        with (
+            patch("scanner.watcher.settings") as mock_cfg,
+            patch("scanner.watcher.status_store", store),
+        ):
+            mock_cfg.watch_dir = str(tmp_path)
+            from scanner.watcher import ImageEventHandler, QueueItem
+
+            q: queue.Queue[QueueItem] = queue.Queue()
+            handler = ImageEventHandler(upload_queue=q)
+            handler.on_created(FileCreatedEvent(str(img)))
+
+        item = q.get_nowait()
+        assert hasattr(item, "path")
+        assert hasattr(item, "record_id")
+        assert item.record_id == store.all()[0].id
+
+    def _seed_record(self, store: object, record_id: str = "r1") -> None:
+        """Add a PENDING record to the store for process_file tests."""
+        from scanner.store import FileRecord, Status, StatusStore
+
+        assert isinstance(store, StatusStore)
+        now = datetime.now(UTC)
+        store.add(
+            FileRecord(
+                id=record_id,
+                filename="scan.jpg",
+                status=Status.PENDING,
+                detected_at=now,
+                updated_at=now,
+                error_message=None,
+                attempts=0,
+            )
+        )
+
+    def test_process_file_updates_to_uploading(
+        self, tmp_watch_dir: Path, tmp_processed_dir: Path
+    ) -> None:
+        """process_file() must call status_store.update(..., UPLOADING) before upload."""
+        from unittest.mock import MagicMock, call, patch
+
+        from scanner.store import Status, StatusStore
+        from scanner.watcher import UploadResult
+
+        img = tmp_watch_dir / "scan.jpg"
+        img.write_bytes(b"\xff\xd8\xff" + b"\x00" * 10)
+        store = StatusStore()
+        self._seed_record(store, "r1")
+        store.update = MagicMock(wraps=store.update)  # type: ignore[method-assign]
+
+        success_result = UploadResult(
+            success=True,
+            file_path=img,
+            http_status=200,
+            destination_path=tmp_processed_dir / "scan.jpg",
+            attempts=1,
+        )
+
+        with (
+            patch("scanner.watcher.upload_image", return_value=success_result),
+            patch("scanner.watcher.settings") as mock_cfg,
+            patch("scanner.watcher.status_store", store),
+        ):
+            mock_cfg.watch_dir = str(tmp_watch_dir)
+            mock_cfg.file_settle_seconds = 0.0
+
+            from scanner.watcher import process_file
+
+            process_file(img, tmp_watch_dir, tmp_processed_dir, record_id="r1")
+
+        update_calls = store.update.call_args_list  # type: ignore[union-attr]
+        # First call should be UPLOADING
+        assert update_calls[0] == call("r1", status=Status.UPLOADING)
+
+    def test_process_file_updates_to_success(
+        self, tmp_watch_dir: Path, tmp_processed_dir: Path
+    ) -> None:
+        """process_file() must update store with SUCCESS on successful upload."""
+        from unittest.mock import MagicMock, patch
+
+        from scanner.store import Status, StatusStore
+        from scanner.watcher import UploadResult
+
+        img = tmp_watch_dir / "scan.jpg"
+        img.write_bytes(b"\xff\xd8\xff" + b"\x00" * 10)
+        store = StatusStore()
+        self._seed_record(store, "r1")
+        store.update = MagicMock(wraps=store.update)  # type: ignore[method-assign]
+
+        success_result = UploadResult(
+            success=True,
+            file_path=img,
+            http_status=200,
+            destination_path=tmp_processed_dir / "scan.jpg",
+            attempts=1,
+        )
+
+        with (
+            patch("scanner.watcher.upload_image", return_value=success_result),
+            patch("scanner.watcher.settings") as mock_cfg,
+            patch("scanner.watcher.status_store", store),
+        ):
+            mock_cfg.watch_dir = str(tmp_watch_dir)
+            mock_cfg.file_settle_seconds = 0.0
+
+            from scanner.watcher import process_file
+
+            process_file(img, tmp_watch_dir, tmp_processed_dir, record_id="r1")
+
+        update_calls = store.update.call_args_list  # type: ignore[union-attr]
+        # Second call should be SUCCESS
+        assert update_calls[1][0][0] == "r1"
+        assert update_calls[1][1]["status"] == Status.SUCCESS
+
+    def test_process_file_updates_to_failed(
+        self, tmp_watch_dir: Path, tmp_processed_dir: Path
+    ) -> None:
+        """process_file() must update store with FAILED on failed upload."""
+        from unittest.mock import MagicMock, patch
+
+        from scanner.store import Status, StatusStore
+        from scanner.watcher import UploadResult
+
+        img = tmp_watch_dir / "scan.jpg"
+        img.write_bytes(b"\xff\xd8\xff" + b"\x00" * 10)
+        store = StatusStore()
+        self._seed_record(store, "r1")
+        store.update = MagicMock(wraps=store.update)  # type: ignore[method-assign]
+
+        failure_result = UploadResult(
+            success=False,
+            file_path=img,
+            error_message="Connection refused",
+            attempts=3,
+        )
+
+        with (
+            patch("scanner.watcher.upload_image", return_value=failure_result),
+            patch("scanner.watcher.settings") as mock_cfg,
+            patch("scanner.watcher.status_store", store),
+        ):
+            mock_cfg.watch_dir = str(tmp_watch_dir)
+            mock_cfg.file_settle_seconds = 0.0
+
+            from scanner.watcher import process_file
+
+            process_file(img, tmp_watch_dir, tmp_processed_dir, record_id="r1")
+
+        update_calls = store.update.call_args_list  # type: ignore[union-attr]
+        # Second call should be FAILED with error_message
+        assert update_calls[1][1]["status"] == Status.FAILED
+        assert "Connection refused" in update_calls[1][1]["error_message"]

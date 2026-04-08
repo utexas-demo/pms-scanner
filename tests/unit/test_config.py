@@ -85,3 +85,15 @@ def test_settings_override_file_settle_seconds() -> None:
 def test_settings_override_log_level() -> None:
     s = _make_settings(log_level="DEBUG")
     assert s.log_level == "DEBUG"
+
+
+# T004: dashboard_port
+
+
+def test_settings_default_dashboard_port() -> None:
+    assert _make_settings().dashboard_port == 8080
+
+
+def test_settings_override_dashboard_port() -> None:
+    s = _make_settings(dashboard_port=9090)
+    assert s.dashboard_port == 9090

@@ -2,7 +2,6 @@
 Configuration loaded from environment variables (with .env support via python-dotenv).
 """
 
-from pathlib import Path
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -35,4 +34,4 @@ class Settings(BaseSettings):
     log_level: str = "INFO"
 
 
-settings = Settings()
+settings = Settings()  # type: ignore[call-arg]

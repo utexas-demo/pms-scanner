@@ -1,0 +1,24 @@
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM"]
+ignore = []
+
+[tool.mypy]
+strict = true
+python_version = "3.12"
+files = ["scanner/"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "--tb=short"
+
+[tool.coverage.run]
+source = ["scanner"]
+omit = ["scanner/__main__.py"]
+
+[tool.coverage.report]
+fail_under = 90
+show_missing = true

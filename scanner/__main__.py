@@ -1,6 +1,7 @@
 import logging
-from config import settings
-from watcher import run
+
+from scanner.config import settings
+from scanner.watcher import run
 
 logging.basicConfig(
     level=settings.log_level.upper(),

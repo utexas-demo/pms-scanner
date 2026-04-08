@@ -1,128 +1,110 @@
-# Feature Specification: [FEATURE NAME]
+# Feature Specification: Upload Progress Dashboard
 
-**Feature Branch**: `[###-feature-name]`  
-**Created**: [DATE]  
-**Status**: Draft  
-**Input**: User description: "$ARGUMENTS"
+**Feature Branch**: `002-upload-progress-ui`
+**Created**: 2026-04-08
+**Status**: Draft
+**Input**: User description: "setup a browser with a fast API that allows the user to view the progress showing all the files with a progress bar as they are getting uploaded."
+
+---
 
 ## User Scenarios & Testing *(mandatory)*
 
-<!--
-  IMPORTANT: User stories should be PRIORITIZED as user journeys ordered by importance.
-  Each user story/journey must be INDEPENDENTLY TESTABLE - meaning if you implement just ONE of them,
-  you should still have a viable MVP (Minimum Viable Product) that delivers value.
-  
-  Assign priorities (P1, P2, P3, etc.) to each story, where P1 is the most critical.
-  Think of each story as a standalone slice of functionality that can be:
-  - Developed independently
-  - Tested independently
-  - Deployed independently
-  - Demonstrated to users independently
--->
+### User Story 1 — Live Upload Dashboard (Priority: P1)
 
-### User Story 1 - [Brief Title] (Priority: P1)
+A user opens a browser and sees a real-time dashboard listing every file the scanner has detected. Each file shows its current status and an upload progress indicator. The view updates automatically — no manual refresh needed.
 
-[Describe this user journey in plain language]
+**Why this priority**: This is the core deliverable. Without live status visibility there is no feature.
 
-**Why this priority**: [Explain the value and why it has this priority level]
-
-**Independent Test**: [Describe how this can be tested independently - e.g., "Can be fully tested by [specific action] and delivers [specific value]"]
+**Independent Test**: Start the scanner with a mock backend, drop 3 image files, open the dashboard URL — all 3 files appear with status transitions (pending → uploading → success) visible within 5 seconds without refreshing the page.
 
 **Acceptance Scenarios**:
 
-1. **Given** [initial state], **When** [action], **Then** [expected outcome]
-2. **Given** [initial state], **When** [action], **Then** [expected outcome]
+1. **Given** the scanner is running and the dashboard is open, **When** a new image file is dropped in the watch folder, **Then** the file appears in the dashboard within 1 second showing status `pending`.
+2. **Given** a file is uploading, **When** the upload completes successfully, **Then** its row updates to `success` and the progress bar reaches 100%.
+3. **Given** a file is uploading, **When** the backend returns an error after all retries, **Then** its row updates to `failed` and the error reason is shown.
+4. **Given** the dashboard is open, **When** no files are being processed, **Then** an empty-state message is shown (e.g., "No files in queue.").
 
 ---
 
-### User Story 2 - [Brief Title] (Priority: P2)
+### User Story 2 — Session Upload History (Priority: P2)
 
-[Describe this user journey in plain language]
+The dashboard retains the full list of uploads for the current service run — including completed and failed files — so the user can audit what has been processed since the scanner started.
 
-**Why this priority**: [Explain the value and why it has this priority level]
+**Why this priority**: Without history the user loses context on completed uploads the moment a new file arrives.
 
-**Independent Test**: [Describe how this can be tested independently]
+**Independent Test**: Drop and successfully upload 5 files, then drop 2 more — the dashboard shows all 7 entries (5 success, 2 new), not just the 2 active ones.
 
 **Acceptance Scenarios**:
 
-1. **Given** [initial state], **When** [action], **Then** [expected outcome]
+1. **Given** 5 files have been successfully uploaded in this session, **When** the user opens or refreshes the dashboard, **Then** all 5 completed entries are still visible.
+2. **Given** a failed upload is in the list, **When** the scanner retries on restart (new session), **Then** the history resets to an empty list (history is per-session, not persistent).
 
 ---
 
-### User Story 3 - [Brief Title] (Priority: P3)
+### User Story 3 — Failed Upload Visibility (Priority: P3)
 
-[Describe this user journey in plain language]
+Failed uploads are prominently distinguished from successful ones, and the error reason is shown so the user understands why the upload did not complete.
 
-**Why this priority**: [Explain the value and why it has this priority level]
+**Why this priority**: Without failure detail the user cannot diagnose problems.
 
-**Independent Test**: [Describe how this can be tested independently]
+**Independent Test**: Configure the backend to return 401; drop a file; confirm the dashboard row shows `failed` status and the error text contains the HTTP status code.
 
 **Acceptance Scenarios**:
 
-1. **Given** [initial state], **When** [action], **Then** [expected outcome]
+1. **Given** a file failed after all retries, **When** the user views the dashboard, **Then** the row is visually distinct (e.g., different colour or icon) from succeeded rows.
+2. **Given** a file failed with HTTP 503, **When** the user reads the error field, **Then** it shows a human-readable message including the status code.
 
 ---
-
-[Add more user stories as needed, each with an assigned priority]
 
 ### Edge Cases
 
-<!--
-  ACTION REQUIRED: The content in this section represents placeholders.
-  Fill them out with the right edge cases.
--->
+- What happens if the browser opens before the scanner has detected any files? → Empty-state message is shown.
+- What happens if the SSE connection drops? → The browser automatically reconnects (standard `EventSource` reconnect behaviour).
+- What happens when the scanner service stops while the dashboard is open? → SSE connection closes; the browser shows a reconnecting state; history already rendered remains visible.
+- What happens if two files with the same name arrive at different times? → Each is tracked independently by a unique ID (not just filename).
 
-- What happens when [boundary condition]?
-- How does system handle [error scenario]?
+---
 
 ## Requirements *(mandatory)*
 
-<!--
-  ACTION REQUIRED: The content in this section represents placeholders.
-  Fill them out with the right functional requirements.
--->
-
 ### Functional Requirements
 
-- **FR-001**: System MUST [specific capability, e.g., "allow users to create accounts"]
-- **FR-002**: System MUST [specific capability, e.g., "validate email addresses"]  
-- **FR-003**: Users MUST be able to [key interaction, e.g., "reset their password"]
-- **FR-004**: System MUST [data requirement, e.g., "persist user preferences"]
-- **FR-005**: System MUST [behavior, e.g., "log all security events"]
+- **FR-001**: System MUST expose a browser-accessible dashboard at a configurable URL (default `http://localhost:8080`).
+- **FR-002**: Dashboard MUST display each tracked file as a row containing: filename, current status, progress indicator, and timestamp of last status change.
+- **FR-003**: Dashboard MUST update in real time using Server-Sent Events (SSE) — status changes MUST appear within 1 second without a page reload.
+- **FR-004**: System MUST track four file statuses: `pending` (detected, awaiting upload), `uploading` (upload in progress), `success` (upload confirmed), `failed` (all retries exhausted).
+- **FR-005**: System MUST retain all upload events for the lifetime of the current scanner process (in-memory; no database required for v1).
+- **FR-006**: Dashboard MUST display the error reason for any file in `failed` status.
+- **FR-007**: System MUST expose a `/health` endpoint returning HTTP 200 for container readiness probes.
+- **FR-008**: The scanner worker MUST publish status-change events to the shared state store so the API reflects live upload activity.
+- **FR-009**: Dashboard MUST be served as a static HTML page by the FastAPI application — no separate frontend build step required.
+- **FR-010**: System MUST allow the dashboard HTTP port to be configured via environment variable `DASHBOARD_PORT` (default `8080`).
 
-*Example of marking unclear requirements:*
+### Key Entities
 
-- **FR-006**: System MUST authenticate users via [NEEDS CLARIFICATION: auth method not specified - email/password, SSO, OAuth?]
-- **FR-007**: System MUST retain user data for [NEEDS CLARIFICATION: retention period not specified]
+- **FileRecord**: Represents one file's upload lifecycle — `id` (unique UUID per detection), `filename`, `status` (pending / uploading / success / failed), `detected_at` (timestamp), `updated_at` (timestamp), `error_message` (nullable string).
+- **StatusStore**: In-memory container shared between the scanner worker thread and the FastAPI app — holds all `FileRecord` objects for the current session; thread-safe.
+- **SSE Event**: Payload pushed to connected browsers whenever a `FileRecord` status changes — contains the serialised `FileRecord`.
 
-### Key Entities *(include if feature involves data)*
-
-- **[Entity 1]**: [What it represents, key attributes without implementation]
-- **[Entity 2]**: [What it represents, relationships to other entities]
+---
 
 ## Success Criteria *(mandatory)*
 
-<!--
-  ACTION REQUIRED: Define measurable success criteria.
-  These must be technology-agnostic and measurable.
--->
-
 ### Measurable Outcomes
 
-- **SC-001**: [Measurable metric, e.g., "Users can complete account creation in under 2 minutes"]
-- **SC-002**: [Measurable metric, e.g., "System handles 1000 concurrent users without degradation"]
-- **SC-003**: [User satisfaction metric, e.g., "90% of users successfully complete primary task on first attempt"]
-- **SC-004**: [Business metric, e.g., "Reduce support tickets related to [X] by 50%"]
+- **SC-001**: The dashboard page fully loads within 2 seconds on a local network connection.
+- **SC-002**: Any status change (detection, upload start, completion, failure) is reflected in the browser within 1 second.
+- **SC-003**: The dashboard correctly shows all files processed in the current session without omission after any number of uploads.
+- **SC-004**: A user can identify at a glance which files are pending, uploading, completed, or failed with no ambiguity.
+- **SC-005**: The service starts without requiring any additional installation steps beyond those already in `requirements.txt` (i.e., `fastapi` and an ASGI server are new dependencies but the user runs one command).
+
+---
 
 ## Assumptions
 
-<!--
-  ACTION REQUIRED: The content in this section represents placeholders.
-  Fill them out with the right assumptions based on reasonable defaults
-  chosen when the feature description did not specify certain details.
--->
-
-- [Assumption about target users, e.g., "Users have stable internet connectivity"]
-- [Assumption about scope boundaries, e.g., "Mobile support is out of scope for v1"]
-- [Assumption about data/environment, e.g., "Existing authentication system will be reused"]
-- [Dependency on existing system/service, e.g., "Requires access to the existing user profile API"]
+- The dashboard is accessed locally or on a trusted LAN — no user authentication on the dashboard UI is required for v1.
+- The FastAPI server runs in the same process as the scanner (same Python process, separate thread) — no additional service or port-forwarding setup required.
+- History is in-memory and resets on service restart; persistent storage across restarts is out of scope for v1.
+- Mobile-responsive layout is not required; the dashboard is expected to be viewed on a desktop browser.
+- `fastapi`, `uvicorn` (or equivalent ASGI server), and `sse-starlette` (or equivalent SSE library) will be added to `requirements.txt`.
+- Progress bars represent upload state transitions rather than byte-level transfer progress (the backend upload is a single multipart POST with no chunked progress events).

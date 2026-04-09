@@ -2,7 +2,8 @@
 Configuration loaded from environment variables (with .env support via python-dotenv).
 """
 
-from pathlib import Path
+from typing import Optional
+from uuid import UUID
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -22,11 +23,15 @@ class Settings(BaseSettings):
     # Seconds to wait after a file appears before uploading (lets writes settle)
     file_settle_seconds: float = 0.5
 
-    # PMS backend upload endpoint, e.g. https://api.example.com/v1/images/upload
-    backend_upload_url: str
+    # Base URL of the pms-backend, e.g. https://api.example.com
+    # The upload path /api/scanned-images/upload is appended automatically.
+    backend_base_url: str
 
-    # Bearer token for the backend API
+    # Bearer token (JWT) issued by the backend
     api_token: str
+
+    # Optional: link every uploaded image to a specific requisition
+    requisition_id: Optional[UUID] = None
 
     # HTTP request timeout in seconds
     upload_timeout_seconds: int = 30

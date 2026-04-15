@@ -53,7 +53,7 @@ def test_upload_page_success(pdf_path: Path, dummy_image: Image.Image):
 
 
 def test_upload_page_filename_convention(pdf_path: Path, dummy_image: Image.Image):
-    """Per-page filename follows {stem}_p{num:03d}.jpg convention."""
+    """Per-page filename follows {stem}_p{num:03d}.tiff convention."""
     with patch.dict(os.environ, {"BACKEND_BASE_URL": "http://x", "API_TOKEN": "t"}):
         from uploader import upload_page
 
@@ -66,7 +66,7 @@ def test_upload_page_filename_convention(pdf_path: Path, dummy_image: Image.Imag
             or call_kwargs[0][2]
         )
         sent_filename = files_arg[0][1][0]
-    assert sent_filename == "scan_20260414_p007.jpg"
+    assert sent_filename == "scan_20260414_p007.tiff"
 
 
 def test_upload_page_http_4xx_returns_false(pdf_path: Path, dummy_image: Image.Image):

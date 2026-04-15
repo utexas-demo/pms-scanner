@@ -61,17 +61,12 @@ def execute_run(state: AppState) -> None:
     run = BatchRunState()
     with state._lock:
         state.current_run = run
+        state.active_runs[run.run_id] = run
     state.emit_event({"type": "run_started", "run_id": run.run_id})
 
     logger.info("Batch run %s started", run.run_id)
 
-    # Step 1: crash recovery
-    recovered = _recover_inprogress(cfg)
-    if recovered:
-        run.recovered_files.extend(recovered)
-        logger.info("Recovered %d file(s) from in-progress/: %s", len(recovered), recovered)
-
-    # Step 2: guard
+    # Guard
     watch_dir = Path(cfg.watch_dir)
     if not watch_dir.exists():
         logger.error(
@@ -82,7 +77,7 @@ def execute_run(state: AppState) -> None:
         _finish_run(state, run, status="failed")
         return
 
-    # Step 3–7: process each PDF
+    # Process each PDF
     pdfs = _find_settled_pdfs(watch_dir, cfg)
     logger.info("Run %s: found %d settled PDF(s)", run.run_id, len(pdfs))
 
@@ -243,7 +238,11 @@ def _finish_run(state: AppState, run: BatchRunState, status: str) -> None:
     run.completed_at = datetime.now(UTC)
     with state._lock:
         state.last_run = run
-        state.current_run = None
+        state.active_runs.pop(run.run_id, None)
+        if state.current_run is run:
+            state.current_run = next(iter(state.active_runs.values()), None)
+        state.history.insert(0, run)
+        del state.history[state.HISTORY_LIMIT:]
     state.emit_event(
         {
             "type": "run_done",

@@ -95,7 +95,7 @@ def _osd_rotation(
     Returns (rotation_degrees, orientation_uncertain).
     """
     try:
-        pil_image = _render_page(page)
+        pil_image = _render_page(page, dpi=300)
         osd = pytesseract.image_to_osd(pil_image)
         # osd is a dict-like object with 'rotate' and 'orientation_conf' keys
         if isinstance(osd, dict):
@@ -142,7 +142,9 @@ def _parse_osd_string(osd_text: str) -> tuple[int, float]:
     return rotate, conf
 
 
-def _render_page(page: fitz.Page) -> Image.Image:
-    """Render a fitz page to a PIL Image (RGB)."""
-    pixmap = page.get_pixmap()
+def _render_page(page: fitz.Page, dpi: int = 72) -> Image.Image:
+    """Render a fitz page to a PIL Image (RGB) at the given DPI."""
+    zoom = dpi / 72.0
+    matrix = fitz.Matrix(zoom, zoom) if zoom != 1.0 else fitz.Identity
+    pixmap = page.get_pixmap(matrix=matrix)
     return Image.frombytes("RGB", (pixmap.width, pixmap.height), pixmap.samples)

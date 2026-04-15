@@ -60,9 +60,9 @@ def test_recover_inprogress_os_error_is_logged(tmp_path: Path, caplog):
         state = AppState()
         with caplog.at_level(logging.WARNING, logger="batch"):
             with patch("pathlib.Path.rename", side_effect=OSError("permission denied")):
-                from batch import execute_run
+                from batch import startup
 
-                execute_run(state)
+                startup(state)
 
     assert any("could not recover" in r.message.lower() for r in caplog.records)
 

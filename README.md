@@ -10,41 +10,86 @@ macOS service that watches a folder for PDF files, extracts and orients every pa
 - **Reports** live progress in a browser dashboard (`http://localhost:8080`)
 - **Runs** as a macOS launchd LaunchAgent — starts at login, survives reboots, waits for the ARIA SMB share before starting
 
-## Quick Start (macOS)
+## Getting Started (macOS) — Step by Step
 
-### Prerequisites
+### 1. Install system dependencies
+
+Homebrew is required. If you don't have it, install from https://brew.sh, then:
 
 ```bash
-brew install tesseract
-python3.12 -m venv .venv
-.venv/bin/pip install -r requirements.txt
+brew install tesseract python@3.12
 ```
 
-### Configure
+Tesseract powers the OSD orientation fallback when a PDF page has no rotation
+metadata. Without it, pages upload but are flagged `orientation_uncertain`.
+
+### 2. Clone and enter the repo
+
+```bash
+git clone git@github.com:utexas-demo/pms-scanner.git
+cd pms-scanner
+```
+
+### 3. Create the virtual environment
+
+```bash
+python3.12 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
+```
+
+### 4. Mount the SMB share
+
+The scanner watches `/Volumes/aria/ARIAscans` by default. Mount the share in
+Finder (⌘K → `smb://<server>/aria`) or let launchd do it via `WaitForPaths`
+once installed as a service.
+
+### 5. Configure `.env`
 
 ```bash
 cp .env.example .env
-# Edit .env — set BACKEND_BASE_URL, API_TOKEN, WATCH_DIR
 ```
 
-### Run manually
+Edit `.env` and set at minimum:
 
-```bash
-.venv/bin/python -m scanner
+```
+BACKEND_BASE_URL=https://reqscanner.mpsinc.io
+API_TOKEN=<your-api-key>
+WATCH_DIR=/Volumes/aria/ARIAscans
+DASHBOARD_PORT=8765
 ```
 
-Open the dashboard: http://localhost:8080
+### 6. Run manually (foreground)
 
-### Install as a macOS service
-
-See [docs/launchd-setup.md](docs/launchd-setup.md) for full instructions.
+From the repo root:
 
 ```bash
-# Quick install
+PYTHONPATH=scanner python scanner/__main__.py
+```
+
+You should see `Scheduler started — interval=60s` and
+`Application startup complete`. Drop a PDF into `WATCH_DIR`, wait up to
+`FILE_SETTLE_SECONDS + CRON_INTERVAL_SECONDS`, and watch it process.
+
+### 7. Open the dashboard
+
+Navigate to **http://localhost:8765** (or whatever `DASHBOARD_PORT` you set).
+
+You'll see live per-page progress, a **Run Now** button to trigger an
+immediate scan, and the last-run summary when idle.
+
+### 8. (Optional) Install as a macOS LaunchAgent
+
+Once manual runs succeed, install as a background service that starts at
+login and waits for the SMB share:
+
+```bash
 sed -i '' "s/YOUR_USERNAME/$(whoami)/g" launchd/io.mpsinc.pms-scanner.plist
 cp launchd/io.mpsinc.pms-scanner.plist ~/Library/LaunchAgents/
 launchctl load ~/Library/LaunchAgents/io.mpsinc.pms-scanner.plist
 ```
+
+Full guide (uninstall, logs, troubleshooting): [docs/launchd-setup.md](docs/launchd-setup.md).
 
 ## Environment Variables
 
@@ -55,7 +100,7 @@ launchctl load ~/Library/LaunchAgents/io.mpsinc.pms-scanner.plist
 | `FILE_SETTLE_SECONDS` | `10.0` | Minimum age (seconds) before a file is processed |
 | `DASHBOARD_PORT` | `8080` | Web dashboard port |
 | `BACKEND_BASE_URL` | *(required)* | Base URL of pms-backend |
-| `API_TOKEN` | *(required)* | JWT Bearer token for the backend |
+| `API_TOKEN` | *(required)* | API key sent as `X-API-Key` header |
 | `UPLOAD_TIMEOUT_SECONDS` | `30` | HTTP timeout for upload requests |
 | `UPLOAD_MAX_RETRIES` | `3` | Max upload attempts per page (retries on 5xx) |
 | `UPLOAD_RETRY_MAX_WAIT_SECONDS` | `10` | Max wait between retries (exponential back-off cap) |

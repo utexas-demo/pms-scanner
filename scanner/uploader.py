@@ -12,7 +12,9 @@ are returned immediately as False.
 
 import io
 import logging
+import threading
 import time
+from collections import deque
 from pathlib import Path
 
 import requests
@@ -20,6 +22,28 @@ from config import settings
 from PIL import Image
 
 logger = logging.getLogger(__name__)
+
+# Client-side rate limiter: at most 60 HTTP requests per 60-second window,
+# including retries. Backend enforces the same quota and returns 429 otherwise.
+_RATE_LIMIT_MAX = 60
+_RATE_LIMIT_WINDOW = 60.0
+_rate_lock = threading.Lock()
+_rate_history: deque[float] = deque()
+
+
+def _rate_limit_acquire() -> None:
+    """Block until a request slot is available within the rolling window."""
+    while True:
+        with _rate_lock:
+            now = time.monotonic()
+            while _rate_history and now - _rate_history[0] >= _RATE_LIMIT_WINDOW:
+                _rate_history.popleft()
+            if len(_rate_history) < _RATE_LIMIT_MAX:
+                _rate_history.append(now)
+                return
+            sleep_for = _RATE_LIMIT_WINDOW - (now - _rate_history[0]) + 0.05
+        logger.info("Rate limit hit — sleeping %.2fs", sleep_for)
+        time.sleep(sleep_for)
 
 
 def upload_page(
@@ -43,9 +67,9 @@ def upload_page(
     True if the backend returned HTTP 2xx and accepted the image.
     False on any permanent or exhausted-retry failure.
     """
-    filename = f"{path.stem}_p{page_num:03d}.jpg"
+    filename = f"{path.stem}_p{page_num:03d}.tiff"
     url = f"{settings.backend_base_url}/api/scanned-images/upload"
-    headers = {"Authorization": f"Bearer {settings.api_token}"}
+    headers = {"X-API-Key": settings.api_token}
 
     form_data: dict[str, str] = {}
     if settings.requisition_id:
@@ -55,12 +79,13 @@ def upload_page(
     max_wait = settings.upload_retry_max_wait_seconds
 
     for attempt in range(max_attempts):
-        image_bytes = _encode_jpeg(image)
+        image_bytes = _encode_tiff(image)
+        _rate_limit_acquire()
         try:
             response = requests.post(
                 url,
                 headers=headers,
-                files=[("files", (filename, image_bytes, "image/jpeg"))],
+                files=[("files", (filename, image_bytes, "image/tiff"))],
                 data=form_data,
                 timeout=settings.upload_timeout_seconds,
             )
@@ -138,8 +163,8 @@ def upload_page(
     return False
 
 
-def _encode_jpeg(image: Image.Image) -> bytes:
-    """Encode a PIL Image to JPEG bytes."""
+def _encode_tiff(image: Image.Image) -> bytes:
+    """Encode a PIL Image to TIFF bytes (LZW-compressed, lossless)."""
     buf = io.BytesIO()
-    image.save(buf, format="JPEG")
+    image.save(buf, format="TIFF", compression="tiff_lzw")
     return buf.getvalue()

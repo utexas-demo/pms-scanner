@@ -57,10 +57,14 @@ class AppState:
     held across any network or I/O call.
     """
 
+    HISTORY_LIMIT = 50
+
     def __init__(self) -> None:
         self._lock: threading.Lock = threading.Lock()
-        self.current_run: BatchRunState | None = None
+        self.current_run: BatchRunState | None = None  # most recent active run
         self.last_run: BatchRunState | None = None
+        self.active_runs: dict[str, BatchRunState] = {}
+        self.history: list[BatchRunState] = []  # completed runs, newest first
         # asyncio event loop reference — set in __main__.py before uvicorn starts
         self.loop: asyncio.AbstractEventLoop | None = None
         # Queue polled by the SSE endpoint
@@ -77,11 +81,15 @@ class AppState:
             self.loop.call_soon_threadsafe(self.event_queue.put_nowait, event)
 
     def to_status_dict(self) -> dict[str, Any]:
-        """Return a JSON-serialisable snapshot of current and last run state."""
+        """Return a JSON-serialisable snapshot of all active + recent runs."""
         with self._lock:
             return {
                 "current_run": _run_to_dict(self.current_run),
                 "last_run": _run_to_dict(self.last_run),
+                "active_runs": [
+                    _run_to_dict(r) for r in self.active_runs.values()
+                ],
+                "history": [_run_to_dict(r) for r in self.history],
             }
 
 

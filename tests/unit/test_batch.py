@@ -48,9 +48,8 @@ def test_crash_recovery_moves_inprogress_back_to_watch(watch_dir: Path):
         {"BACKEND_BASE_URL": "http://x", "API_TOKEN": "t", "WATCH_DIR": str(watch_dir)},
     ):
         state = _make_app_state()
-        from batch import execute_run
-        with patch("batch.process_pdf", return_value=[]):
-            execute_run(state)
+        from batch import startup
+        startup(state)
 
     assert not stranded.exists()
     assert (watch_dir / "stranded.pdf").exists()

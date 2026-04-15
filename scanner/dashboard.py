@@ -129,86 +129,125 @@ _DASHBOARD_HTML = """<!DOCTYPE html>
 <title>PMS Scanner Dashboard</title>
 <style>
   body { font-family: monospace; background: #1a1a2e; color: #e0e0e0; padding: 20px; }
-  h1   { color: #00d4ff; }
-  #status-box { background: #16213e; border: 1px solid #0f3460; border-radius: 6px;
-                padding: 16px; margin-top: 16px; }
-  #filename  { font-size: 1.1em; color: #e94560; font-weight: bold; }
-  #progress  { font-size: 2em; color: #00d4ff; margin: 8px 0; }
-  #runstatus { color: #aaa; font-size: 0.9em; }
-  #last-run  { margin-top: 20px; color: #888; font-size: 0.85em; }
+  h1, h2 { color: #00d4ff; }
+  h2 { font-size: 1.1em; margin-top: 24px; border-bottom: 1px solid #0f3460; padding-bottom: 4px; }
+  .run { background: #16213e; border: 1px solid #0f3460; border-radius: 6px;
+         padding: 12px; margin: 10px 0; }
+  .run.active { border-color: #00d4ff; }
+  .run-header { display: flex; gap: 12px; align-items: center; color: #aaa; font-size: 0.85em; flex-wrap: wrap; }
+  .run-id { color: #00d4ff; }
+  .status-pill { padding: 2px 8px; border-radius: 10px; font-size: 0.8em; }
+  .status-running   { background: #00d4ff; color: #1a1a2e; }
+  .status-completed { background: #3ddc84; color: #1a1a2e; }
+  .status-failed    { background: #e94560; color: #fff; }
+  .file { margin: 6px 0 6px 10px; font-size: 0.9em; }
+  .file-name { color: #e94560; font-weight: bold; }
+  .progress-bar { background: #0f3460; height: 6px; border-radius: 3px; margin-top: 4px; overflow: hidden; }
+  .progress-fill { background: #00d4ff; height: 100%; transition: width 0.25s; }
+  .file-status-completed .file-name { color: #3ddc84; }
+  .file-status-failed    .file-name { color: #e94560; }
+  .counters { color: #aaa; margin-left: 8px; font-size: 0.85em; }
   button { background: #0f3460; color: #e0e0e0; border: 1px solid #00d4ff;
            padding: 8px 16px; cursor: pointer; border-radius: 4px; margin-top: 12px; }
   button:hover { background: #00d4ff; color: #1a1a2e; }
+  .empty { color: #666; font-style: italic; }
 </style>
 </head>
 <body>
 <h1>PMS Scanner</h1>
-<div id="status-box">
-  <div id="runstatus">Connecting...</div>
-  <div id="filename"></div>
-  <div id="progress"></div>
-</div>
-<div id="last-run"></div>
-<button onclick="triggerRun()">&#9654; Run Now</button>
+<button id="run-btn">&#9654; Run Now</button>
+
+<h2>Active Runs <span id="active-count" class="counters"></span></h2>
+<div id="active-runs"></div>
+
+<h2>History <span id="history-count" class="counters"></span></h2>
+<div id="history"></div>
 
 <script>
-const statusEl   = document.getElementById('runstatus');
-const filenameEl = document.getElementById('filename');
-const progressEl = document.getElementById('progress');
-const lastRunEl  = document.getElementById('last-run');
+const activeEl = document.getElementById('active-runs');
+const historyEl = document.getElementById('history');
+const activeCountEl = document.getElementById('active-count');
+const historyCountEl = document.getElementById('history-count');
 
-function triggerRun() {
-  fetch('/run', { method: 'POST' })
-    .then(r => r.json())
-    .then(d => { statusEl.textContent = 'Run queued: ' + d.run_id; });
+document.getElementById('run-btn').addEventListener('click', () => {
+  fetch('/run', { method: 'POST' });
+});
+
+function fmtTime(iso) {
+  if (!iso) return '';
+  return new Date(iso).toLocaleTimeString();
 }
 
-// Load initial state
-fetch('/status').then(r => r.json()).then(renderStatus);
-
-function renderStatus(data) {
-  if (data.last_run) {
-    const lr = data.last_run;
-    lastRunEl.textContent = 'Last run: ' + lr.run_id + ' (' + lr.status + ')' +
-      ' — ' + (lr.files ? lr.files.length : 0) + ' file(s)';
-  }
-  if (!data.current_run) {
-    statusEl.textContent = 'Idle — waiting for next scheduled run';
-    filenameEl.textContent = '';
-    progressEl.textContent = '';
-  }
+function el(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text !== undefined) n.textContent = text;
+  return n;
 }
+
+function buildFile(f) {
+  const wrap = el('div', 'file file-status-' + f.status);
+  wrap.appendChild(el('span', 'file-name', f.filename));
+  const pagesDone = (f.pages || []).length;
+  const total = f.total_pages || 0;
+  const failed = (f.pages || []).filter(p => !p.upload_success).length;
+  const counters = total
+    ? pagesDone + ' / ' + total + (failed ? ' (' + failed + ' failed)' : '') + ' — ' + f.status
+    : 'scanning... — ' + f.status;
+  wrap.appendChild(el('span', 'counters', counters));
+  const bar = el('div', 'progress-bar');
+  const fill = el('div', 'progress-fill');
+  fill.style.width = (total ? (pagesDone / total * 100) : 0) + '%';
+  bar.appendChild(fill);
+  wrap.appendChild(bar);
+  return wrap;
+}
+
+function buildRun(run, isActive) {
+  const wrap = el('div', isActive ? 'run active' : 'run');
+  const hdr = el('div', 'run-header');
+  hdr.appendChild(el('span', 'run-id', run.run_id.slice(0, 8)));
+  hdr.appendChild(el('span', 'status-pill status-' + run.status, run.status));
+  const times = 'started ' + fmtTime(run.started_at) +
+    (run.completed_at ? ' · done ' + fmtTime(run.completed_at) : '');
+  hdr.appendChild(el('span', null, times));
+  wrap.appendChild(hdr);
+  const files = run.files || [];
+  if (files.length === 0) {
+    wrap.appendChild(el('div', 'file empty', 'no files yet'));
+  } else {
+    files.forEach(f => wrap.appendChild(buildFile(f)));
+  }
+  return wrap;
+}
+
+function replaceChildren(parent, nodes) {
+  while (parent.firstChild) parent.removeChild(parent.firstChild);
+  nodes.forEach(n => parent.appendChild(n));
+}
+
+function refresh() {
+  fetch('/status').then(r => r.json()).then(data => {
+    const active = data.active_runs || [];
+    const history = data.history || [];
+    activeCountEl.textContent = active.length ? '(' + active.length + ')' : '';
+    historyCountEl.textContent = history.length ? '(' + history.length + ')' : '';
+    if (active.length === 0) {
+      replaceChildren(activeEl, [el('div', 'empty', 'Idle — waiting for next scheduled run')]);
+    } else {
+      replaceChildren(activeEl, active.map(r => buildRun(r, true)));
+    }
+    replaceChildren(historyEl, history.map(r => buildRun(r, false)));
+  });
+}
+
+refresh();
 
 const es = new EventSource('/events');
-es.addEventListener('run_started', e => {
-  const d = JSON.parse(e.data);
-  statusEl.textContent = 'Run started: ' + d.run_id;
-  filenameEl.textContent = '';
-  progressEl.textContent = '';
-});
-es.addEventListener('file_started', e => {
-  const d = JSON.parse(e.data);
-  filenameEl.textContent = d.filename;
-  progressEl.textContent = '0 / ' + (d.total_pages || '?');
-});
-es.addEventListener('page_done', e => {
-  const d = JSON.parse(e.data);
-  filenameEl.textContent = d.filename;
-  progressEl.textContent = d.page_num + ' / ' + d.total_pages;
-});
-es.addEventListener('file_done', e => {
-  const d = JSON.parse(e.data);
-  statusEl.textContent = 'File done: ' + d.filename + ' (' + d.status + ')';
-});
-es.addEventListener('run_done', e => {
-  const d = JSON.parse(e.data);
-  statusEl.textContent = 'Run complete (' + d.files + ' file(s))';
-  filenameEl.textContent = '';
-  progressEl.textContent = '';
-  fetch('/status').then(r => r.json()).then(renderStatus);
+['run_started', 'file_started', 'page_done', 'file_done', 'run_done'].forEach(t => {
+  es.addEventListener(t, () => refresh());
 });
 es.addEventListener('heartbeat', () => {});
-es.onerror = () => { statusEl.textContent = 'Connection lost — retrying...'; };
 </script>
 </body>
 </html>

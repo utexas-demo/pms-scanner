@@ -3,6 +3,6 @@ services:
     build: .
     restart: unless-stopped
     volumes:
-      - ./incoming:/data/incoming   # host folder → container watch dir
+      - /Volumes/aria/ARIAscans:/data/incoming   # ARIAscans network share → container watch dir
     env_file:
       - .env

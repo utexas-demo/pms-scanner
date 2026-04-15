@@ -1,42 +1,48 @@
 <!--
 SYNC IMPACT REPORT
 ==================
-Version change: [template] → 1.0.0
-Modified principles: (none — initial authoring from blank template)
+Version change: 1.0.0 → 2.0.0
+Modified principles:
+  - Principle I: "Windows-First, Unattended Operation" → "macOS-First, Unattended Operation"
+    (platform changed from Windows to macOS; supervisor changed from Docker/NSSM to launchd)
+Removed sections:
+  - "Windows Deployment Standards" — replaced by "macOS Deployment Standards"
 Added sections:
-  - Core Principles (5 principles)
-  - Windows Deployment Standards
-  - Development Workflow & Quality Gates
-  - Governance
+  - "macOS Deployment Standards"
 Templates requiring updates:
-  - .specify/templates/plan-template.md  ✅ aligned — Constitution Check section maps to 5 principles
-  - .specify/templates/spec-template.md  ✅ no structural changes needed
-  - .specify/templates/tasks-template.md ✅ no structural changes needed — TDD task ordering already present
+  - .specify/templates/plan-template.md  ✅ no changes needed — Constitution Check section is generic
+  - .specify/templates/spec-template.md  ✅ no changes needed
+  - .specify/templates/tasks-template.md ✅ no changes needed
+  - specs/003-we-watch-all/plan.md       ✅ already reflects macOS; Complexity Tracking violation now resolved
 Follow-up TODOs:
-  - None — all placeholders resolved
+  - Remove the Complexity Tracking violation entry for Principle I from
+    specs/003-we-watch-all/plan.md — it is no longer a violation under v2.0.0
 -->
 
 # pms-scanner Constitution
 
 ## Core Principles
 
-### I. Windows-First, Unattended Operation
+### I. macOS-First, Unattended Operation
 
-This service MUST run reliably as a background process on Windows machines without any
+This service MUST run reliably as a background process on macOS machines without any
 human interaction. Specific requirements:
 
-- The service MUST handle restarts gracefully via a process supervisor (Docker Desktop
-  `restart: unless-stopped`, NSSM, or `win32serviceutil`).
+- The service MUST handle restarts gracefully via launchd (`KeepAlive: true` in the
+  LaunchAgent plist). No other process supervisor is required or supported.
 - The service MUST NOT require an interactive session or GUI at any point.
 - All file-system paths MUST be configurable via environment variables — no hard-coded
-  Windows paths (e.g., `C:\...`) in source code.
-- The watcher MUST recover from transient I/O errors (locked files, network share
+  paths (e.g., `/Users/someone/...` or `/Volumes/aria/...`) in source code.
+- The service MUST recover from transient I/O errors (locked files, network share
   interruptions) without crashing; retry logic with exponential back-off is REQUIRED.
 - Startup and shutdown lifecycle MUST be explicitly managed: log startup success,
   trap SIGTERM/SIGINT, and flush in-flight uploads before exit.
+- The launchd plist MUST use `WaitForPaths` to delay startup until the SMB watch
+  volume is mounted — preventing silent failures on boot before the share is available.
 
 **Rationale**: An unattended service that crashes silently causes data loss. Reliability
-and self-recovery are non-negotiable for a production background process.
+and self-recovery are non-negotiable for a production background process running on
+shared office infrastructure.
 
 ### II. Test-Driven Development (NON-NEGOTIABLE)
 
@@ -51,7 +57,7 @@ TDD MUST be followed without exception on every change:
 Test pyramid for this project:
 
 - **Unit tests**: Pure logic — config parsing, retry calculation, file-settle logic.
-- **Integration tests**: Watcher lifecycle, HTTP upload against a local mock server.
+- **Integration tests**: Batch runner lifecycle, HTTP upload against a local mock server.
 - **Contract tests**: API contract against the backend upload endpoint schema.
 
 **Rationale**: TDD prevents regressions, forces clear interface design before
@@ -104,20 +110,23 @@ review:
 implementation time. Accurate, current documentation is the only operational guide
 available without interrupting the original author.
 
-## Windows Deployment Standards
+## macOS Deployment Standards
 
-- **Supported hosts**: Windows 10/11 (x64), Windows Server 2019/2022.
-- **Recommended supervisor**: Docker Desktop with `restart: unless-stopped` is the
-  preferred deployment method. NSSM (Non-Sucking Service Manager) is the recommended
-  alternative for native Windows service registration.
+- **Supported hosts**: macOS 13 (Ventura) or later; Apple Silicon (arm64) and Intel (x86_64).
+- **Service management**: launchd `LaunchAgent` with `KeepAlive: true` is the required
+  deployment method. The plist lives in `~/Library/LaunchAgents/`. No Docker, NSSM,
+  or other supervisors are used or supported.
+- **SMB mount dependency**: The launchd plist MUST include a `WaitForPaths` entry for
+  the watch volume (e.g., `/Volumes/aria/ARIAscans`) so the service does not start
+  until the network share is mounted.
 - **Environment config**: All configuration via `.env` file or system environment
-  variables — never baked into the Docker image or committed to source control.
-- **Volume mapping**: The `incoming` watch directory MUST be a host-mounted volume;
-  all container-to-host path mappings MUST be documented in `README.md`.
+  variables — never baked into the plist or committed to source control.
+- **Volume mapping**: The watch directory MUST be an SMB share mounted via Finder or
+  System Settings → Login Items; the mount path MUST be documented in `README.md`.
 - **Security**: `api_token` MUST be supplied via environment variable only — never
-  stored in source control, Docker image layers, or log output.
-- **Health monitoring**: A health-check mechanism (Docker `HEALTHCHECK` directive or
-  a lightweight `/healthz` HTTP endpoint) SHOULD be provided.
+  stored in source control, plist files, or log output.
+- **Health monitoring**: A lightweight `GET /healthz` HTTP endpoint MUST be provided
+  so operators can confirm the service is alive without parsing logs.
 
 ## Development Workflow & Quality Gates
 
@@ -160,4 +169,4 @@ the pms-scanner project.
 - All contributors and AI agents MUST read this constitution before beginning any
   work on the project.
 
-**Version**: 1.0.0 | **Ratified**: 2026-04-08 | **Last Amended**: 2026-04-08
+**Version**: 2.0.0 | **Ratified**: 2026-04-08 | **Last Amended**: 2026-04-14

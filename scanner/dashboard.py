@@ -19,8 +19,8 @@ from collections.abc import AsyncGenerator
 
 from fastapi import FastAPI
 from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
-from state import AppState
-from state import app_state as _default_app_state
+from .state import AppState
+from .state import app_state as _default_app_state
 
 logger = logging.getLogger(__name__)
 
@@ -92,7 +92,7 @@ async def manual_run() -> JSONResponse:
 
     Returns 202 immediately; the run proceeds asynchronously.
     """
-    from batch import execute_run
+    from .batch import execute_run
 
     run_id = str(uuid.uuid4())
     logger.info("Manual /run triggered — run_id=%s", run_id)

@@ -25,10 +25,10 @@ import sys
 import uvicorn
 from apscheduler.executors.pool import ThreadPoolExecutor  # type: ignore[import-untyped,unused-ignore]
 from apscheduler.schedulers.background import BackgroundScheduler  # type: ignore[import-untyped,unused-ignore]
-from batch import execute_run, startup
-from config import settings
-from dashboard import app as dashboard_app
-from state import app_state
+from .batch import execute_run, startup
+from .config import settings
+from .dashboard import app as dashboard_app
+from .state import app_state
 
 logging.basicConfig(
     level=settings.log_level.upper(),

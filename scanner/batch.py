@@ -22,10 +22,10 @@ import time
 from datetime import UTC, datetime
 from pathlib import Path
 
-from config import Settings
-from pdf_processor import process_pdf
-from state import AppState, BatchRunState, FileResult, PageResult
-from uploader import upload_page
+from .config import Settings
+from .pdf_processor import process_pdf
+from .state import AppState, BatchRunState, FileResult, PageResult
+from .uploader import upload_page
 
 logger = logging.getLogger(__name__)
 

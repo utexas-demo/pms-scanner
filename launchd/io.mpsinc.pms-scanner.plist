@@ -1,0 +1,70 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN"
+  "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+
+  <!-- Service identity -->
+  <key>Label</key>
+  <string>io.mpsinc.pms-scanner</string>
+
+  <!-- Restart on exit or crash -->
+  <key>KeepAlive</key>
+  <true/>
+
+  <!--
+    Wait for the ARIA SMB share to mount before starting.
+    Adjust the path if your share mounts at a different location.
+  -->
+  <key>WaitForPaths</key>
+  <array>
+    <string>/Volumes/aria/ARIAscans</string>
+  </array>
+
+  <!--
+    Command to run.
+    Replace /Users/YOUR_USERNAME with your actual home directory.
+    The Python interpreter is taken from the project's virtual environment.
+  -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/YOUR_USERNAME/Projects/utexas/pms-scanner/.venv/bin/python</string>
+    <string>-m</string>
+    <string>scanner</string>
+  </array>
+
+  <!-- Working directory (repo root — so .env is found automatically) -->
+  <key>WorkingDirectory</key>
+  <string>/Users/YOUR_USERNAME/Projects/utexas/pms-scanner</string>
+
+  <!-- Log files -->
+  <key>StandardOutPath</key>
+  <string>/tmp/pms-scanner.log</string>
+  <key>StandardErrorPath</key>
+  <string>/tmp/pms-scanner.error.log</string>
+
+  <!--
+    Environment variables injected at launch.
+    Secrets (API_TOKEN, BACKEND_BASE_URL) are NOT listed here — they must be
+    present in the .env file at WorkingDirectory so they are not exposed in the
+    launchd XML (which is readable by any local user).
+  -->
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>PATH</key>
+    <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin</string>
+  </dict>
+
+  <!-- Run on load (after WaitForPaths condition is satisfied) -->
+  <key>RunAtLoad</key>
+  <true/>
+
+  <!--
+    Throttle restarts — wait at least 10 s before restarting after a crash.
+    This prevents a tight restart loop if the share is unmounted unexpectedly.
+  -->
+  <key>ThrottleInterval</key>
+  <integer>10</integer>
+
+</dict>
+</plist>

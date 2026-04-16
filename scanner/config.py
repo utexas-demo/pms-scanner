@@ -2,8 +2,9 @@
 Configuration loaded from environment variables (with .env support via python-dotenv).
 """
 
-from typing import Optional
+from pathlib import Path
 from uuid import UUID
+
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -14,30 +15,46 @@ class Settings(BaseSettings):
         case_sensitive=False,
     )
 
-    # Directory to watch for incoming images
+    # Directory to watch for incoming PDFs
     watch_dir: str = "/data/incoming"
 
-    # Recurse into sub-directories of watch_dir
-    watch_recursive: bool = True
+    # Seconds to wait after a file appears before claiming it (lets writes settle)
+    file_settle_seconds: float = 10.0
 
-    # Seconds to wait after a file appears before uploading (lets writes settle)
-    file_settle_seconds: float = 0.5
+    # How often the batch runner fires (seconds)
+    cron_interval_seconds: int = 60
+
+    # Port for the live progress dashboard
+    dashboard_port: int = 8080
 
     # Base URL of the pms-backend, e.g. https://api.example.com
-    # The upload path /api/scanned-images/upload is appended automatically.
     backend_base_url: str
 
     # Bearer token (JWT) issued by the backend
     api_token: str
 
-    # Optional: link every uploaded image to a specific requisition
-    requisition_id: Optional[UUID] = None
+    # Optional: link every uploaded page to a specific requisition
+    requisition_id: UUID | None = None
 
     # HTTP request timeout in seconds
     upload_timeout_seconds: int = 30
 
+    # Maximum upload retry attempts before giving up on a page
+    upload_max_retries: int = 3
+
+    # Maximum wait between retries (seconds, for exponential back-off ceiling)
+    upload_retry_max_wait_seconds: int = 10
+
     # Logging level: DEBUG | INFO | WARNING | ERROR
     log_level: str = "INFO"
 
+    @property
+    def inprogress_dir(self) -> Path:
+        return Path(self.watch_dir) / "in-progress"
 
-settings = Settings()
+    @property
+    def processed_dir(self) -> Path:
+        return Path(self.watch_dir) / "processed"
+
+
+settings = Settings()  # type: ignore[call-arg]

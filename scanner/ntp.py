@@ -10,6 +10,8 @@ from __future__ import annotations
 
 import logging
 import socket
+import subprocess
+import threading
 import time
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -25,6 +27,15 @@ _MAX_PLAUSIBLE_OFFSET_SECONDS = 86_400.0
 _KISS_OF_DEATH_STRATUM = 16
 
 NTPOutcome = Literal["ok", "rejected_kod"]
+
+ClockSyncOutcome = Literal[
+    "ok", "drift_corrected", "drift_uncorrected", "unreachable", "rejected_kod"
+]
+
+# Outcomes that represent a problem an operator should see surfaced.
+_WARNING_OUTCOMES: frozenset[str] = frozenset(
+    {"drift_uncorrected", "unreachable", "rejected_kod"}
+)
 
 
 class NTPUnreachableError(RuntimeError):
@@ -183,3 +194,200 @@ class NTPGate:
                     f"within {self._timeout}s"
                 )
             self._sleep(self._poll)
+
+
+@dataclass(frozen=True, slots=True)
+class ClockSyncEvent:
+    """A timestamped record of one NTP measurement (data-model.md)."""
+
+    measured_at: datetime
+    source: str
+    offset_seconds: float
+    outcome: ClockSyncOutcome
+    correction_exit_code: int | None = None
+
+
+class _DriftSink(Protocol):
+    recent_clock_sync: ClockSyncEvent | None
+    last_drift_warning: ClockSyncEvent | None
+
+
+CorrectionRunner = Callable[[list[str]], int]
+
+
+def _default_runner(argv: list[str]) -> int:
+    return subprocess.run(argv, check=False).returncode
+
+
+class DriftMonitor:
+    """Recurring drift check + out-of-band clock correction (FR-023/024).
+
+    Each cycle measures offset. Within threshold → ``ok``. Over threshold
+    → invoke the configured privileged helper as ``[command, source]``;
+    exit 0 → ``drift_corrected``, otherwise (non-zero, missing helper, or
+    no command configured) → ``drift_uncorrected`` with a WARNING. An
+    unreachable source or KoD response is a warning outcome but does not
+    halt the process (running on the last-known-good clock, FR-024).
+    """
+
+    def __init__(
+        self,
+        client: _Measurer,
+        *,
+        max_drift_seconds: float,
+        check_interval_seconds: float,
+        correct_clock_command: str | None,
+        runner: CorrectionRunner = _default_runner,
+        sink: _DriftSink | None = None,
+        on_event: Callable[[ClockSyncEvent], None] | None = None,
+    ) -> None:
+        self._client = client
+        self._max_drift = max_drift_seconds
+        self._interval = check_interval_seconds
+        self._command = correct_clock_command
+        self._runner = runner
+        self._sink = sink
+        self._on_event = on_event
+        self._stop = threading.Event()
+        self._thread: threading.Thread | None = None
+
+    # -- single cycle ----------------------------------------------------
+
+    def check_once(self) -> ClockSyncEvent:
+        source = self._client.source
+        try:
+            m = self._client.measure()
+        except NTPUnreachableError:
+            return self._record(
+                ClockSyncEvent(
+                    datetime.now(UTC), source, 0.0, "unreachable", None
+                ),
+                "NTP source %s unreachable mid-run — continuing on "
+                "last-known-good clock (FR-024)",
+                source,
+            )
+
+        if m.outcome == "rejected_kod":
+            return self._record(
+                ClockSyncEvent(
+                    m.measured_at, m.source, m.offset_seconds, "rejected_kod"
+                ),
+                "NTP source %s returned an unusable (kiss-of-death) "
+                "response — ignoring",
+                source,
+            )
+
+        if abs(m.offset_seconds) <= self._max_drift:
+            return self._record(
+                ClockSyncEvent(
+                    m.measured_at, m.source, m.offset_seconds, "ok"
+                )
+            )
+
+        # Drift exceeds threshold — correction required (FR-023).
+        if not self._command:
+            return self._record(
+                ClockSyncEvent(
+                    m.measured_at,
+                    m.source,
+                    m.offset_seconds,
+                    "drift_uncorrected",
+                    None,
+                ),
+                "Clock drift %.6fs vs %s exceeds %.3fs but no correction "
+                "command is configured (verify-only mode)",
+                m.offset_seconds,
+                source,
+                self._max_drift,
+            )
+
+        try:
+            code = self._runner([self._command, source])
+        except FileNotFoundError:
+            return self._record(
+                ClockSyncEvent(
+                    m.measured_at,
+                    m.source,
+                    m.offset_seconds,
+                    "drift_uncorrected",
+                    None,
+                ),
+                "Clock-correction helper %s not found — drift %.6fs vs %s "
+                "left uncorrected",
+                self._command,
+                m.offset_seconds,
+                source,
+            )
+
+        if code == 0:
+            ev = ClockSyncEvent(
+                m.measured_at,
+                m.source,
+                m.offset_seconds,
+                "drift_corrected",
+                0,
+            )
+            logger.info(
+                "Clock drift %.6fs vs %s corrected via %s",
+                m.offset_seconds,
+                source,
+                self._command,
+            )
+            return self._record(ev)
+
+        return self._record(
+            ClockSyncEvent(
+                m.measured_at,
+                m.source,
+                m.offset_seconds,
+                "drift_uncorrected",
+                code,
+            ),
+            "Clock-correction helper %s exited %d — drift %.6fs vs %s "
+            "left uncorrected",
+            self._command,
+            code,
+            m.offset_seconds,
+            source,
+        )
+
+    # -- background loop -------------------------------------------------
+
+    def start(self) -> None:
+        if self._thread is not None:
+            return
+        self._stop.clear()
+        self._thread = threading.Thread(
+            target=self._loop, name="ntp-drift-monitor", daemon=True
+        )
+        self._thread.start()
+
+    def stop(self) -> None:
+        self._stop.set()
+        if self._thread is not None:
+            self._thread.join(timeout=5.0)
+            self._thread = None
+
+    def _loop(self) -> None:
+        while not self._stop.is_set():
+            try:
+                self.check_once()
+            except Exception:  # noqa: BLE001 — never let the thread die
+                logger.exception("DriftMonitor cycle raised — continuing")
+            self._stop.wait(self._interval)
+
+    # -- helpers ---------------------------------------------------------
+
+    def _record(
+        self, event: ClockSyncEvent, msg: str | None = None, *args: object
+    ) -> ClockSyncEvent:
+        if msg is not None:
+            logger.warning(msg, *args)
+        if self._sink is not None:
+            self._sink.recent_clock_sync = event
+            if event.outcome in _WARNING_OUTCOMES:
+                self._sink.last_drift_warning = event
+        if self._on_event is not None:
+            self._on_event(event)
+        return event
+

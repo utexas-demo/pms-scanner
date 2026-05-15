@@ -2,7 +2,7 @@
 import threading
 from datetime import datetime
 
-from state import AppState, BatchRunState, FileResult, PageResult
+from state import AppState, FileResult, PageResult, RunRecord
 
 
 def test_app_state_initial_values():
@@ -39,15 +39,15 @@ def test_file_result_defaults():
 
 
 def test_batch_run_state_has_run_id():
-    """BatchRunState auto-generates a run_id UUID string."""
-    r = BatchRunState()
+    """RunRecord auto-generates a run_id UUID string."""
+    r = RunRecord()
     assert isinstance(r.run_id, str)
     assert len(r.run_id) == 36  # UUID4 format
 
 
 def test_batch_run_state_defaults():
-    """BatchRunState starts with status=running and empty lists."""
-    r = BatchRunState()
+    """RunRecord starts with status=running and empty lists."""
+    r = RunRecord()
     assert r.status == "running"
     assert r.files == []
     assert r.recovered_files == []
@@ -83,9 +83,9 @@ def test_to_status_dict_structure():
 
 
 def test_to_status_dict_with_run():
-    """to_status_dict serialises a BatchRunState correctly."""
+    """to_status_dict serialises a RunRecord correctly."""
     s = AppState()
-    run = BatchRunState()
+    run = RunRecord()
     with s._lock:
         s.current_run = run
     d = s.to_status_dict()

@@ -38,7 +38,7 @@ class FileResult:
 
 
 @dataclass
-class BatchRunState:
+class RunRecord:
     """Represents a single scheduled batch run."""
 
     run_id: str = field(default_factory=lambda: str(uuid4()))
@@ -61,10 +61,10 @@ class AppState:
 
     def __init__(self) -> None:
         self._lock: threading.Lock = threading.Lock()
-        self.current_run: BatchRunState | None = None  # most recent active run
-        self.last_run: BatchRunState | None = None
-        self.active_runs: dict[str, BatchRunState] = {}
-        self.history: list[BatchRunState] = []  # completed runs, newest first
+        self.current_run: RunRecord | None = None  # most recent active run
+        self.last_run: RunRecord | None = None
+        self.active_runs: dict[str, RunRecord] = {}
+        self.history: list[RunRecord] = []  # completed runs, newest first
         # asyncio event loop reference — set in __main__.py before uvicorn starts
         self.loop: asyncio.AbstractEventLoop | None = None
         # Queue polled by the SSE endpoint
@@ -120,7 +120,7 @@ def _file_to_dict(f: FileResult) -> dict[str, Any]:
     }
 
 
-def _run_to_dict(run: BatchRunState | None) -> dict[str, Any] | None:
+def _run_to_dict(run: RunRecord | None) -> dict[str, Any] | None:
     if run is None:
         return None
     return {

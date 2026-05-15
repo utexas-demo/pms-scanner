@@ -4,14 +4,14 @@ import os
 
 
 def test_to_status_dict_current_run_fields():
-    """to_status_dict includes all required BatchRunState fields."""
+    """to_status_dict includes all required RunRecord fields."""
     with __import__("unittest.mock", fromlist=["patch"]).patch.dict(
         os.environ, {"BACKEND_BASE_URL": "http://x", "API_TOKEN": "t"}
     ):
-        from state import AppState, BatchRunState, FileResult
+        from state import AppState, FileResult, RunRecord
 
         s = AppState()
-        run = BatchRunState()
+        run = RunRecord()
         file_r = FileResult(filename="test.pdf", total_pages=3)
         file_r.status = "in_progress"
         run.files.append(file_r)

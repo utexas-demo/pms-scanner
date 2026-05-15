@@ -24,7 +24,7 @@ from pathlib import Path
 
 from .config import Settings
 from .pdf_processor import process_pdf
-from .state import AppState, BatchRunState, FileResult, PageResult
+from .state import AppState, FileResult, PageResult, RunRecord
 from .uploader import upload_page
 
 logger = logging.getLogger(__name__)
@@ -56,11 +56,11 @@ def execute_run(state: AppState) -> None:
     Execute one full batch run.
 
     Thread-safe: multiple concurrent runs are allowed; each run gets its own
-    BatchRunState and claims files atomically so no file is processed twice.
+    RunRecord and claims files atomically so no file is processed twice.
     """
     cfg = Settings()  # type: ignore[call-arg]
 
-    run = BatchRunState()
+    run = RunRecord()
     with state._lock:
         state.current_run = run
         state.active_runs[run.run_id] = run
@@ -134,7 +134,7 @@ def _find_settled_pdfs(watch_dir: Path, cfg: Settings) -> list[Path]:
 
 def _process_one_file(
     pdf_path: Path,
-    run: BatchRunState,
+    run: RunRecord,
     state: AppState,
     cfg: Settings,
 ) -> None:
@@ -239,7 +239,7 @@ def _process_one_file(
         )
 
 
-def _finish_run(state: AppState, run: BatchRunState, status: str) -> None:
+def _finish_run(state: AppState, run: RunRecord, status: str) -> None:
     run.status = status  # type: ignore[assignment]
     run.completed_at = datetime.now(UTC)
     with state._lock:

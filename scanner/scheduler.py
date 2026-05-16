@@ -1,1 +1,151 @@
-"""Per-(machine, environment) APScheduler job construction (004)."""
+"""Per-(machine, environment) APScheduler jobs (004 US3).
+
+One ``CronTrigger`` job per *enabled* environment on this machine, at
+``second=<offset>``, ``minute='*'`` with ``max_instances=1`` +
+``coalesce=True`` + ``misfire_grace_time=30`` (research.md §2): cross-env
+concurrency (FR-006a) via a thread pool; same-env overlap suppression
+(FR-006b) via coalescing.
+"""
+
+from __future__ import annotations
+
+import logging
+from collections.abc import Callable
+from dataclasses import dataclass, field
+from datetime import datetime, timedelta
+from typing import TYPE_CHECKING, Any
+
+from apscheduler.executors.pool import (  # type: ignore[import-untyped,unused-ignore]
+    ThreadPoolExecutor,
+)
+from apscheduler.schedulers.background import (  # type: ignore[import-untyped,unused-ignore]
+    BackgroundScheduler,
+)
+from apscheduler.triggers.cron import (  # type: ignore[import-untyped,unused-ignore]
+    CronTrigger,
+)
+from apscheduler.triggers.date import (  # type: ignore[import-untyped,unused-ignore]
+    DateTrigger,
+)
+
+if TYPE_CHECKING:
+    from .config import AppSettings
+    from .state import BatchRunState
+
+logger = logging.getLogger("scanner.scheduler")
+
+
+@dataclass(frozen=True, slots=True)
+class JobSpec:
+    """One APScheduler registration for an (machine, env) pair."""
+
+    job_id: str
+    env_name: str
+    trigger_kwargs: dict[str, Any]
+    max_instances: int = 1
+    coalesce: bool = True
+    misfire_grace_time: int = 30
+
+
+def build_jobs(settings: AppSettings) -> list[JobSpec]:
+    """One JobSpec per ENABLED environment on this machine (FR-006/006b)."""
+    machine = settings.machine.name
+    return [
+        JobSpec(
+            job_id=f"{machine}:{env.name}",
+            env_name=env.name,
+            trigger_kwargs={
+                "second": env.schedule_offset_seconds,
+                "minute": "*",
+            },
+        )
+        for env in settings.enabled_environments
+    ]
+
+
+@dataclass(slots=True)
+class Scheduler:
+    """Owns the BackgroundScheduler and the per-env job registrations."""
+
+    settings: AppSettings
+    state: BatchRunState | None = None
+    run_env: Callable[[str], None] | None = None
+    _scheduler: BackgroundScheduler = field(init=False)
+
+    def __post_init__(self) -> None:
+        n = max(1, len(self.settings.enabled_environments))
+        pool = max(4, 2 * n)
+        self._scheduler = BackgroundScheduler(
+            executors={"default": ThreadPoolExecutor(max_workers=pool)}
+        )
+        if self.run_env is None:
+            self.run_env = self._default_run_env
+
+    # -- job action ------------------------------------------------------
+
+    def _default_run_env(self, env_name: str) -> None:
+        from .batch import BatchRunner
+
+        assert self.state is not None
+        env = next(
+            e for e in self.settings.environments if e.name == env_name
+        )
+        BatchRunner(
+            env,
+            self.settings.machine,
+            self.state,
+            settle_seconds=self.settings.file_settle_seconds,
+            upload_timeout_seconds=self.settings.upload_timeout_seconds,
+            upload_max_retries=self.settings.upload_max_retries,
+            upload_retry_max_wait_seconds=(
+                self.settings.upload_retry_max_wait_seconds
+            ),
+        ).run_once()
+
+    def _dispatch(self, env_name: str) -> None:
+        assert self.run_env is not None
+        logger.info(
+            "[machine=%s env=%s] scheduled poll firing",
+            self.settings.machine.name,
+            env_name,
+        )
+        self.run_env(env_name)
+
+    def _coalesce_listener(self, event: Any) -> None:
+        logger.info(
+            "[machine=%s] job %s coalesced — at most one queued follow-up "
+            "(FR-006b)",
+            self.settings.machine.name,
+            getattr(event, "job_id", "?"),
+        )
+
+    # -- registration / lifecycle ---------------------------------------
+
+    def register(self, *, immediate: bool = False) -> None:
+        specs = build_jobs(self.settings)
+        for spec in specs:
+            if immediate:
+                trigger = DateTrigger(
+                    run_date=datetime.now() + timedelta(seconds=0.2)
+                )
+            else:
+                trigger = CronTrigger(**spec.trigger_kwargs)
+            self._scheduler.add_job(
+                self._dispatch,
+                trigger=trigger,
+                args=[spec.env_name],
+                id=spec.job_id,
+                name=spec.job_id,
+                max_instances=spec.max_instances,
+                coalesce=spec.coalesce,
+                misfire_grace_time=spec.misfire_grace_time,
+                replace_existing=True,
+            )
+
+    def start(self) -> None:
+        if not self._scheduler.running:
+            self._scheduler.start()
+
+    def stop(self) -> None:
+        if self._scheduler.running:
+            self._scheduler.shutdown(wait=True)

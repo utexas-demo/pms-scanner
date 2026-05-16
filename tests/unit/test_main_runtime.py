@@ -55,7 +55,7 @@ def _settings(tmp_path, **overrides):
 
 def test_build_runtime_creates_per_machine_dirs(tmp_path) -> None:
     s = _settings(tmp_path)
-    rt = main_mod.build_runtime(s, ntp_client=_FakeClient(0.0))
+    main_mod.build_runtime(s, ntp_client=_FakeClient(0.0))
     for env in s.environments:
         assert env.in_progress_dir(s.machine).is_dir()
         assert env.processed_dir.is_dir()

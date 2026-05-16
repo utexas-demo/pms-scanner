@@ -173,15 +173,19 @@ class _RedactingFilter(logging.Filter):
             re.compile(re.escape(s)) for s in secrets if s and s.strip()
         ]
 
-    def filter(self, record: logging.LogRecord) -> bool:
-        if not self._patterns:
-            return True
-        message = record.getMessage()
-        for pat in self._patterns:
-            message = pat.sub("***", message)
-        record.msg = message
-        record.args = None
-        return True
+    def filter(self, record: logging.LogRecord) -> logging.LogRecord:
+        # A redactor transforms and passes records through — it never
+        # drops one. Returning the (possibly mutated) record satisfies
+        # the logging contract (any truthy result keeps the record; a
+        # LogRecord is used as-is on 3.12+) without an invariant
+        # constant return.
+        if self._patterns:
+            message = record.getMessage()
+            for pat in self._patterns:
+                message = pat.sub("***", message)
+            record.msg = message
+            record.args = None
+        return record
 
 
 class _EnvMachineAdapter(logging.LoggerAdapter):  # type: ignore[type-arg]

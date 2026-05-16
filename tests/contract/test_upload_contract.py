@@ -51,3 +51,66 @@ def test_upload_endpoint_contract():
     assert "rejected" in body, f"Missing 'rejected' in response: {body}"
     assert isinstance(body["images"], list)
     assert isinstance(body["rejected"], list)
+
+
+# ---------------------------------------------------------------------------
+# T023 — client-side request shape is identical across both environments
+# (upload-endpoint.md: only base URL + bearer token differ per env).
+# ---------------------------------------------------------------------------
+
+from pathlib import Path  # noqa: E402
+from unittest.mock import MagicMock, patch  # noqa: E402
+
+from config import Environment  # noqa: E402
+from pydantic import SecretStr  # noqa: E402
+from uploader import upload_page  # noqa: E402
+
+_ENVS = [
+    ("production", "https://adg.mpsinc.io", "prod-token"),
+    ("staging", "https://dev.adg.mpsinc.io", "staging-token"),
+]
+
+
+def _env(name: str, url: str, token: str) -> Environment:
+    return Environment(
+        name=name,  # type: ignore[arg-type]
+        watch_dir=Path("/tmp") / name,
+        backend_base_url=url,
+        api_token=SecretStr(token),
+        schedule_offset_seconds=0,
+    )
+
+
+def _ok() -> MagicMock:
+    r = MagicMock()
+    r.status_code = 200
+    r.raise_for_status.return_value = None
+    r.json.return_value = {
+        "batch_id": "b",
+        "images": [{"original_file_name": "f"}],
+        "rejected": [],
+    }
+    return r
+
+
+@pytest.mark.parametrize("name,url,token", _ENVS)
+def test_request_shape_identical_across_envs(
+    name: str, url: str, token: str, tmp_path: Path
+) -> None:
+    env = _env(name, url, token)
+    img = Image.new("RGB", (40, 40), color=(1, 2, 3))
+    with patch("uploader.requests.post", return_value=_ok()) as post:
+        assert upload_page(env, tmp_path / "scan.pdf", 1, 2, img) is True
+
+    kwargs = post.call_args.kwargs
+    called_url = (
+        post.call_args.args[0] if post.call_args.args else kwargs["url"]
+    )
+    # Only the base URL + bearer token differ between environments.
+    assert called_url == f"{url}/api/scanned-images/upload"
+    assert kwargs["headers"] == {"Authorization": f"Bearer {token}"}
+    files = kwargs["files"]
+    assert files[0][0] == "files"
+    assert files[0][1][0] == "scan_p001.tiff"
+    assert files[0][1][2] == "image/tiff"
+    assert kwargs["data"] == {}

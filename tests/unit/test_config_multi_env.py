@@ -163,3 +163,19 @@ def test_environment_is_a_dataclass_or_model_with_required_fields(
     assert isinstance(e, Environment)
     assert e.name in {"production", "staging"}
     assert isinstance(e.watch_dir, Path)
+
+
+def test_http_backend_rejected_even_with_former_escape_hatch(
+    tmp_path: Path,
+) -> None:
+    """Security regression: plaintext HTTP backends are rejected
+    unconditionally. The old `LOG_LEVEL=DEBUG` + `PMS_SCANNER_ALLOW_INSECURE=1`
+    escape hatch was removed (uploads carry patient scans); setting both
+    must NOT re-enable cleartext.
+    """
+    env = _base_env(str(tmp_path / "p"), str(tmp_path / "s"))
+    env["ENV_PRODUCTION__BACKEND_BASE_URL"] = "http://adg.mpsinc.io"
+    env["LOG_LEVEL"] = "DEBUG"
+    env["PMS_SCANNER_ALLOW_INSECURE"] = "1"
+    with pytest.raises(ConfigError, match="must be https://"):
+        _build(env)

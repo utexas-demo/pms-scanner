@@ -82,9 +82,9 @@ not auto-derived by the app from `MACHINE_IDENTITY`.
 4. Resolved `WATCH_DIR` values of enabled envs are pairwise distinct.
 5. `SCHEDULE_OFFSET_SECONDS` of enabled envs are pairwise distinct.
 6. NTP gate passes per `data-model.md`.
-7. `BACKEND_BASE_URL` parses as `https://…` (HTTP allowed only when
-   `LOG_LEVEL=DEBUG` *and* a `PMS_SCANNER_ALLOW_INSECURE=1` escape hatch is set;
-   defaults are HTTPS).
+7. `BACKEND_BASE_URL` parses as `https://…` — HTTPS is required
+   unconditionally (no plaintext-HTTP escape hatch, since uploads carry
+   patient scans); defaults are HTTPS.
 
 Failure → log a single `ERROR` line naming the offending field and the
 violated rule (never the token value) and exit `1`.

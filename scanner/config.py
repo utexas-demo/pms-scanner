@@ -221,19 +221,14 @@ class AppSettings(BaseSettings):
         )
 
     def _check_scheme(self, upper: str, url: str) -> None:
-        if url.startswith("https://"):
-            return
-        import os
-
-        insecure_ok = (
-            self.log_level.upper() == "DEBUG"
-            and os.environ.get("PMS_SCANNER_ALLOW_INSECURE") == "1"
-        )
-        if url.startswith("http://") and insecure_ok:
-            return
-        raise ValueError(
-            f"ENV_{upper}__BACKEND_BASE_URL must be https:// (got {url!r})"
-        )
+        # HTTPS is required unconditionally: uploads carry patient scans,
+        # so there is no plaintext-HTTP escape hatch (not even gated on
+        # DEBUG) — a misconfigured dev env must never exfiltrate PHI in
+        # cleartext.
+        if not url.startswith("https://"):
+            raise ValueError(
+                f"ENV_{upper}__BACKEND_BASE_URL must be https:// (got {url!r})"
+            )
 
     @staticmethod
     def _check_distinct(envs: list[Environment]) -> None:

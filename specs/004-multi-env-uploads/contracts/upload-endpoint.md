@@ -13,8 +13,18 @@ environment (FR-002 / FR-003 / FR-005):
 
 | Source environment | Base URL | Auth header |
 |---|---|---|
-| `production` | `https://adg.mpsinc.io` | `Bearer ${ENV_PRODUCTION__API_TOKEN}` |
-| `staging` | `https://dev.adg.mpsinc.io` | `Bearer ${ENV_STAGING__API_TOKEN}` |
+| `production` | `https://adg.mpsinc.io` | `X-API-Key: ${ENV_PRODUCTION__API_TOKEN}` |
+| `staging` | `https://dev.adg.mpsinc.io` | `X-API-Key: ${ENV_STAGING__API_TOKEN}` |
+
+> **Auth-header correction (2026-05-15).** Earlier revisions of this table and
+> the 004 uploader used `Authorization: Bearer <token>`. That is wrong: the
+> backend authenticates opaque `pms_…` API keys **only** via the `X-API-Key`
+> header (`pms-backend` `src/pms/middleware/auth.py` — `X-API-Key` →
+> DB key lookup; `Authorization: Bearer` → JWT decode, which 401s
+> `{"detail":"Invalid token"}` for an API key). 003's working code used
+> `X-API-Key`; the T020 env-aware rewrite regressed it to `Bearer`. Verified
+> live: same token returns HTTP 422 (auth OK, missing file) via `X-API-Key`
+> vs HTTP 401 via `Bearer`.
 
 The `Environment` object (see `data-model.md`) carries both fields; the
 uploader signature changes from 003's implicit `Settings` dependency to an

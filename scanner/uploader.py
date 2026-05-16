@@ -70,7 +70,7 @@ def upload_page(
     """
     filename = f"{path.stem}_p{page_num:03d}.tiff"
     url = f"{env.backend_base_url}/api/scanned-images/upload"
-    headers = {"Authorization": f"Bearer {env.api_token.get_secret_value()}"}
+    headers = {"X-API-Key": env.api_token.get_secret_value()}
 
     form_data: dict[str, str] = {}
     if env.requisition_id is not None:

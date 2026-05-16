@@ -36,7 +36,7 @@ def test_upload_endpoint_contract():
 
     response = requests.post(
         f"{backend_url}/api/scanned-images/upload",
-        headers={"Authorization": f"Bearer {api_token}"},
+        headers={"X-API-Key": api_token},
         files=[("files", ("contract_test_p001.jpg", buf.read(), "image/jpeg"))],
         timeout=30,
     )
@@ -55,7 +55,7 @@ def test_upload_endpoint_contract():
 
 # ---------------------------------------------------------------------------
 # T023 — client-side request shape is identical across both environments
-# (upload-endpoint.md: only base URL + bearer token differ per env).
+# (upload-endpoint.md: only base URL + X-API-Key value differ per env).
 # ---------------------------------------------------------------------------
 
 from pathlib import Path  # noqa: E402
@@ -106,9 +106,9 @@ def test_request_shape_identical_across_envs(
     called_url = (
         post.call_args.args[0] if post.call_args.args else kwargs["url"]
     )
-    # Only the base URL + bearer token differ between environments.
+    # Only the base URL + X-API-Key value differ between environments.
     assert called_url == f"{url}/api/scanned-images/upload"
-    assert kwargs["headers"] == {"Authorization": f"Bearer {token}"}
+    assert kwargs["headers"] == {"X-API-Key": token}
     files = kwargs["files"]
     assert files[0][0] == "files"
     assert files[0][1][0] == "scan_p001.tiff"

@@ -1,9 +1,13 @@
 """Unit tests for the env-aware uploader — T019 (004 US1).
 
 upload_page(env, ...) MUST post to ``env.backend_base_url +
-/api/scanned-images/upload`` with ``Authorization: Bearer <env token>``
+/api/scanned-images/upload`` with ``X-API-Key: <env token>``
 and the env's optional requisition_id — never a hard-coded host or
 module-level config (FR-002/003/005, upload-endpoint.md contract).
+
+The backend authenticates opaque ``pms_…`` API keys ONLY via the
+``X-API-Key`` header; ``Authorization: Bearer`` routes to JWT decode
+and always 401s for an API key. (Regression fixed post-T020.)
 """
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -56,7 +60,7 @@ STG = ("staging", "https://dev.adg.mpsinc.io", "stg-token-ABC")
 
 
 @pytest.mark.parametrize("name,url,token", [PROD, STG])
-def test_posts_to_env_url_with_bearer_token(
+def test_posts_to_env_url_with_api_key(
     name: str, url: str, token: str, image: Image.Image, tmp_path: Path
 ) -> None:
     env = _env(name, url, token)
@@ -66,7 +70,8 @@ def test_posts_to_env_url_with_bearer_token(
     called_url = post.call_args.args[0] if post.call_args.args else post.call_args.kwargs["url"]
     assert called_url == f"{url}/api/scanned-images/upload"
     headers = post.call_args.kwargs["headers"]
-    assert headers["Authorization"] == f"Bearer {token}"
+    assert headers["X-API-Key"] == token
+    assert "Authorization" not in headers
 
 
 def test_no_hardcoded_host_anywhere(image: Image.Image, tmp_path: Path) -> None:

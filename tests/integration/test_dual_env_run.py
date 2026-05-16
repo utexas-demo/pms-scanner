@@ -259,3 +259,73 @@ async def test_simultaneous_dual_env_trigger(configured) -> None:
 
     assert (prod.processed_dir / "p.pdf").is_file()
     assert (stg.processed_dir / "s.pdf").is_file()
+
+
+# ---------------------------------------------------------------------------
+# T036 — staggered schedule lands on the assigned offsets (SC-007)
+# ---------------------------------------------------------------------------
+
+
+def test_staggered_schedule_offsets_over_10min(tmp_path: Path) -> None:
+    from datetime import datetime, timedelta
+
+    from apscheduler.triggers.cron import CronTrigger
+    from scheduler import build_jobs
+
+    settings = _settings(tmp_path)  # macmini: prod :00, staging :15
+    specs = {j.env_name: j for j in build_jobs(settings)}
+
+    base = datetime(2026, 5, 15, 12, 0, 0)
+    for env_name, offset in (("production", 0), ("staging", 15)):
+        trig = CronTrigger(**specs[env_name].trigger_kwargs)
+        prev = base
+        fires = []
+        for _ in range(10):  # 10-minute window, one fire per minute
+            nxt = trig.get_next_fire_time(None, prev + timedelta(seconds=1))
+            fires.append(nxt)
+            prev = nxt
+        assert len(fires) == 10
+        for f in fires:
+            assert f.second == offset  # within ±1s of the assigned offset
+        assert len({f.minute for f in fires}) == 10  # one fire per minute
+
+
+# ---------------------------------------------------------------------------
+# T037 — same-env overlapping firings coalesce, decision logged (FR-006b)
+# ---------------------------------------------------------------------------
+
+
+def test_same_env_coalescing(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    import logging
+    import threading
+    import time as _t
+
+    from scheduler import Scheduler
+
+    settings = _settings(tmp_path)
+    runs: list[float] = []
+    started = threading.Event()
+
+    def slow_run(_env: str) -> None:
+        started.set()
+        runs.append(_t.monotonic())
+        _t.sleep(0.6)  # spans several fast trigger intervals
+
+    sched = Scheduler(settings, run_env=slow_run)
+    sched.register(interval_seconds=0.1)  # fast repeating trigger (test hook)
+    with caplog.at_level(logging.INFO, logger="scanner.scheduler"):
+        sched.start()
+        try:
+            started.wait(timeout=3)
+            _t.sleep(1.0)  # many would-be firings while run #1 is busy
+        finally:
+            sched.stop()
+
+    # max_instances=1 + coalesce ⇒ far fewer runs than the ~10 firings.
+    assert 1 <= len(runs) <= 3
+    assert any(
+        "skip" in r.getMessage().lower() or "coalesc" in r.getMessage().lower()
+        for r in caplog.records
+    )

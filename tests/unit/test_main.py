@@ -6,7 +6,7 @@ from unittest.mock import MagicMock, patch
 
 def test_sigterm_stops_scheduler():
     """SIGTERM signal calls scheduler.shutdown(wait=True)."""
-    with patch.dict(os.environ, {"BACKEND_BASE_URL": "http://x", "API_TOKEN": "t"}):
+    with patch.dict(os.environ, {"BACKEND_BASE_URL": "https://x", "API_TOKEN": "t"}):
         import importlib
 
         import scanner.__main__ as main_mod
@@ -24,7 +24,7 @@ def test_sigterm_stops_scheduler():
 
 def test_sigint_stops_scheduler():
     """SIGINT signal calls scheduler.shutdown(wait=True)."""
-    with patch.dict(os.environ, {"BACKEND_BASE_URL": "http://x", "API_TOKEN": "t"}):
+    with patch.dict(os.environ, {"BACKEND_BASE_URL": "https://x", "API_TOKEN": "t"}):
         import importlib
 
         import scanner.__main__ as main_mod
@@ -42,7 +42,7 @@ def test_sigint_stops_scheduler():
 
 def test_shutdown_no_scheduler_still_exits():
     """_shutdown exits cleanly even when scheduler is None."""
-    with patch.dict(os.environ, {"BACKEND_BASE_URL": "http://x", "API_TOKEN": "t"}):
+    with patch.dict(os.environ, {"BACKEND_BASE_URL": "https://x", "API_TOKEN": "t"}):
         import importlib
 
         import scanner.__main__ as main_mod

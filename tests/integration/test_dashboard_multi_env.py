@@ -51,7 +51,7 @@ async def configured(tmp_path: Path):
     dashboard.configure(settings, state)
     try:
         async with AsyncClient(
-            transport=ASGITransport(app=dashboard.app), base_url="http://test"
+            transport=ASGITransport(app=dashboard.app), base_url="https://test"
         ) as ac:
             yield ac, settings, state, dashboard
     finally:

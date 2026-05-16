@@ -35,7 +35,7 @@ def test_process_pdf_page_count(tmp_path):
     pages = [_make_mock_page(rotation=0) for _ in range(3)]
     mock_doc = _make_mock_doc(pages)
 
-    with patch.dict(os.environ, {"BACKEND_BASE_URL": "http://x", "API_TOKEN": "t"}):
+    with patch.dict(os.environ, {"BACKEND_BASE_URL": "https://x", "API_TOKEN": "t"}):
         with patch("pdf_processor.fitz.open", return_value=mock_doc):
             with patch("pdf_processor.Image.frombytes") as mock_frombytes:
                 mock_frombytes.return_value = MagicMock()
@@ -50,7 +50,7 @@ def test_process_pdf_rotation_applied_when_page_rotated(tmp_path):
     pages = [_make_mock_page(rotation=90)]
     mock_doc = _make_mock_doc(pages)
 
-    with patch.dict(os.environ, {"BACKEND_BASE_URL": "http://x", "API_TOKEN": "t"}):
+    with patch.dict(os.environ, {"BACKEND_BASE_URL": "https://x", "API_TOKEN": "t"}):
         with patch("pdf_processor.fitz.open", return_value=mock_doc):
             with patch("pdf_processor.Image.frombytes") as mock_frombytes:
                 mock_frombytes.return_value = MagicMock()
@@ -67,7 +67,7 @@ def test_process_pdf_no_rotation_when_upright(tmp_path):
     mock_doc = _make_mock_doc(pages)
     osd_result = {"rotate": 0, "orientation_conf": 5.0}
 
-    with patch.dict(os.environ, {"BACKEND_BASE_URL": "http://x", "API_TOKEN": "t"}):
+    with patch.dict(os.environ, {"BACKEND_BASE_URL": "https://x", "API_TOKEN": "t"}):
         with patch("pdf_processor.fitz.open", return_value=mock_doc):
             with patch("pdf_processor.Image.frombytes") as mock_frombytes:
                 mock_frombytes.return_value = MagicMock()
@@ -85,7 +85,7 @@ def test_process_pdf_pytesseract_fallback_called_when_pdf_rotation_zero(tmp_path
     mock_doc = _make_mock_doc(pages)
     osd_result = {"rotate": 0, "orientation_conf": 5.0}
 
-    with patch.dict(os.environ, {"BACKEND_BASE_URL": "http://x", "API_TOKEN": "t"}):
+    with patch.dict(os.environ, {"BACKEND_BASE_URL": "https://x", "API_TOKEN": "t"}):
         with patch("pdf_processor.fitz.open", return_value=mock_doc):
             with patch("pdf_processor.Image.frombytes") as mock_frombytes:
                 mock_frombytes.return_value = MagicMock()
@@ -105,7 +105,7 @@ def test_process_pdf_pytesseract_not_called_when_rotation_nonzero(tmp_path):
     pages = [_make_mock_page(rotation=270)]
     mock_doc = _make_mock_doc(pages)
 
-    with patch.dict(os.environ, {"BACKEND_BASE_URL": "http://x", "API_TOKEN": "t"}):
+    with patch.dict(os.environ, {"BACKEND_BASE_URL": "https://x", "API_TOKEN": "t"}):
         with patch("pdf_processor.fitz.open", return_value=mock_doc):
             with patch("pdf_processor.Image.frombytes") as mock_frombytes:
                 mock_frombytes.return_value = MagicMock()
@@ -121,7 +121,7 @@ def test_process_pdf_orientation_uncertain_when_both_tiers_fail(tmp_path):
     pages = [_make_mock_page(rotation=0)]
     mock_doc = _make_mock_doc(pages)
 
-    with patch.dict(os.environ, {"BACKEND_BASE_URL": "http://x", "API_TOKEN": "t"}):
+    with patch.dict(os.environ, {"BACKEND_BASE_URL": "https://x", "API_TOKEN": "t"}):
         with patch("pdf_processor.fitz.open", return_value=mock_doc):
             with patch("pdf_processor.Image.frombytes") as mock_frombytes:
                 mock_frombytes.return_value = MagicMock()
@@ -142,7 +142,7 @@ def test_process_pdf_page_num_is_one_indexed(tmp_path):
     pages = [_make_mock_page() for _ in range(2)]
     mock_doc = _make_mock_doc(pages)
 
-    with patch.dict(os.environ, {"BACKEND_BASE_URL": "http://x", "API_TOKEN": "t"}):
+    with patch.dict(os.environ, {"BACKEND_BASE_URL": "https://x", "API_TOKEN": "t"}):
         with patch("pdf_processor.fitz.open", return_value=mock_doc):
             with patch("pdf_processor.Image.frombytes") as mock_frombytes:
                 mock_frombytes.return_value = MagicMock()

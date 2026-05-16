@@ -28,6 +28,7 @@ import uvicorn
 from .config import AppSettings, ConfigError, load_settings
 from .dashboard import app as dashboard_app
 from .dashboard import configure as _configure_dashboard
+from .dashboard import emit_clock_event as _emit_clock_event
 from .ntp import (
     ClockSyncEvent,
     DriftMonitor,
@@ -133,6 +134,28 @@ def configure_services(runtime: Runtime) -> Scheduler:
         BatchRunner(
             env, runtime.settings.machine, runtime.state
         ).recover_stranded()
+
+    machine_name = runtime.settings.machine.name
+    _warn = {"drift_uncorrected", "unreachable", "rejected_kod"}
+
+    def _on_clock(ev: ClockSyncEvent) -> None:
+        _emit_clock_event(
+            {
+                "type": (
+                    "clock_drift_warning"
+                    if ev.outcome in _warn
+                    else "clock_sync"
+                ),
+                "machine": machine_name,
+                "source": ev.source,
+                "offset_seconds": ev.offset_seconds,
+                "outcome": ev.outcome,
+                "correction_exit_code": ev.correction_exit_code,
+                "measured_at": ev.measured_at.isoformat(),
+            }
+        )
+
+    runtime.drift_monitor._on_event = _on_clock
 
     _configure_dashboard(runtime.settings, runtime.state)
     sched = Scheduler(runtime.settings, runtime.state)

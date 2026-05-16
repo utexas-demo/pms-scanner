@@ -166,7 +166,7 @@ def test_configure_services_wires_drift_events_to_dashboard(tmp_path) -> None:
     rt = main_mod.build_runtime(s, ntp_client=_FakeClient(0.0))
     captured: list[dict] = []
     with patch.object(
-        dashboard, "emit_clock_event", side_effect=captured.append
+        main_mod, "_emit_clock_event", side_effect=captured.append
     ):
         sched = main_mod.configure_services(rt)
         try:

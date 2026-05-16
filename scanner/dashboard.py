@@ -290,59 +290,54 @@ _DASHBOARD_HTML = """<!DOCTYPE html>
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PMS Scanner Dashboard</title>
+<title>PMS Scanner — multi-env</title>
 <style>
-  body { font-family: monospace; background: #1a1a2e; color: #e0e0e0; padding: 20px; }
-  h1, h2 { color: #00d4ff; }
-  h2 { font-size: 1.1em; margin-top: 24px; border-bottom: 1px solid #0f3460; padding-bottom: 4px; }
-  .run { background: #16213e; border: 1px solid #0f3460; border-radius: 6px;
-         padding: 12px; margin: 10px 0; }
-  .run.active { border-color: #00d4ff; }
-  .run-header { display: flex; gap: 12px; align-items: center;
-                color: #aaa; font-size: 0.85em; flex-wrap: wrap; }
-  .run-id { color: #00d4ff; }
-  .status-pill { padding: 2px 8px; border-radius: 10px; font-size: 0.8em; }
-  .status-running   { background: #00d4ff; color: #1a1a2e; }
-  .status-completed { background: #3ddc84; color: #1a1a2e; }
-  .status-failed    { background: #e94560; color: #fff; }
-  .file { margin: 6px 0 6px 10px; font-size: 0.9em; }
+  body { font-family: monospace; background: #1a1a2e; color: #e0e0e0;
+         padding: 20px; }
+  h1 { color: #00d4ff; margin-bottom: 4px; }
+  .banner { background: #16213e; border: 1px solid #0f3460;
+            border-radius: 6px; padding: 10px 14px; margin: 10px 0; }
+  .banner b { color: #00d4ff; }
+  .ntp-ok { color: #3ddc84; }
+  .ntp-warn { color: #e94560; }
+  .panes { display: flex; gap: 16px; flex-wrap: wrap; }
+  .pane { flex: 1 1 360px; background: #16213e;
+          border: 1px solid #0f3460; border-radius: 6px; padding: 14px; }
+  .pane h2 { color: #00d4ff; margin: 0 0 6px 0; font-size: 1.1em; }
+  .pane .meta { color: #aaa; font-size: 0.82em; margin-bottom: 8px; }
+  .pane.disabled { opacity: 0.5; }
+  .kv { display: flex; justify-content: space-between;
+        border-bottom: 1px solid #0f3460; padding: 3px 0; font-size: 0.9em; }
   .file-name { color: #e94560; font-weight: bold; }
   .progress-bar { background: #0f3460; height: 6px; border-radius: 3px;
-                  margin-top: 4px; overflow: hidden; }
-  .progress-fill { background: #00d4ff; height: 100%; transition: width 0.25s; }
-  .file-status-completed .file-name { color: #3ddc84; }
-  .file-status-failed    .file-name { color: #e94560; }
-  .counters { color: #aaa; margin-left: 8px; font-size: 0.85em; }
+                  margin-top: 6px; overflow: hidden; }
+  .progress-fill { background: #00d4ff; height: 100%;
+                   transition: width 0.25s; }
+  .errs { color: #e94560; font-size: 0.82em; margin-top: 6px; }
   button { background: #0f3460; color: #e0e0e0; border: 1px solid #00d4ff;
-           padding: 8px 16px; cursor: pointer; border-radius: 4px; margin-top: 12px; }
+           padding: 6px 12px; cursor: pointer; border-radius: 4px; }
   button:hover { background: #00d4ff; color: #1a1a2e; }
   .empty { color: #666; font-style: italic; }
 </style>
 </head>
 <body>
+<!-- Per-machine view. One pane per environment: production, staging. -->
 <h1>PMS Scanner</h1>
-<button id="run-btn">&#9654; Run Now</button>
-
-<h2>Active Runs <span id="active-count" class="counters"></span></h2>
-<div id="active-runs"></div>
-
-<h2>History <span id="history-count" class="counters"></span></h2>
-<div id="history"></div>
+<div class="banner">
+  machine <b id="machine">…</b> ·
+  <span id="ntp">NTP …</span> ·
+  <button id="run-btn">&#9654; Run all envs now</button>
+</div>
+<div class="panes" id="panes"></div>
 
 <script>
-const activeEl = document.getElementById('active-runs');
-const historyEl = document.getElementById('history');
-const activeCountEl = document.getElementById('active-count');
-const historyCountEl = document.getElementById('history-count');
+const machineEl = document.getElementById('machine');
+const ntpEl = document.getElementById('ntp');
+const panesEl = document.getElementById('panes');
 
 document.getElementById('run-btn').addEventListener('click', () => {
   fetch('/run', { method: 'POST' });
 });
-
-function fmtTime(iso) {
-  if (!iso) return '';
-  return new Date(iso).toLocaleTimeString();
-}
 
 function el(tag, cls, text) {
   const n = document.createElement(tag);
@@ -350,69 +345,68 @@ function el(tag, cls, text) {
   if (text !== undefined) n.textContent = text;
   return n;
 }
-
-function buildFile(f) {
-  const wrap = el('div', 'file file-status-' + f.status);
-  wrap.appendChild(el('span', 'file-name', f.filename));
-  const pagesDone = (f.pages || []).length;
-  const total = f.total_pages || 0;
-  const failed = (f.pages || []).filter(p => !p.upload_success).length;
-  const counters = total
-    ? pagesDone + ' / ' + total + (failed ? ' (' + failed + ' failed)' : '') + ' — ' + f.status
-    : 'scanning... — ' + f.status;
-  wrap.appendChild(el('span', 'counters', counters));
-  const bar = el('div', 'progress-bar');
-  const fill = el('div', 'progress-fill');
-  fill.style.width = (total ? (pagesDone / total * 100) : 0) + '%';
-  bar.appendChild(fill);
-  wrap.appendChild(bar);
-  return wrap;
+function kv(parent, k, v) {
+  const row = el('div', 'kv');
+  row.appendChild(el('span', null, k));
+  row.appendChild(el('span', null, String(v)));
+  parent.appendChild(row);
 }
 
-function buildRun(run, isActive) {
-  const wrap = el('div', isActive ? 'run active' : 'run');
-  const hdr = el('div', 'run-header');
-  hdr.appendChild(el('span', 'run-id', run.run_id.slice(0, 8)));
-  hdr.appendChild(el('span', 'status-pill status-' + run.status, run.status));
-  const times = 'started ' + fmtTime(run.started_at) +
-    (run.completed_at ? ' · done ' + fmtTime(run.completed_at) : '');
-  hdr.appendChild(el('span', null, times));
-  wrap.appendChild(hdr);
-  const files = run.files || [];
-  if (files.length === 0) {
-    wrap.appendChild(el('div', 'file empty', 'no files yet'));
-  } else {
-    files.forEach(f => wrap.appendChild(buildFile(f)));
+function buildPane(name, env) {
+  const pane = el('div', 'pane' + (env.enabled ? '' : ' disabled'));
+  pane.appendChild(el('h2', null, name));
+  pane.appendChild(el('div', 'meta',
+    'backend ' + env.backend_base_url +
+    ' · poll :' + String(env.schedule_offset_seconds).padStart(2, '0') +
+    (env.enabled ? '' : ' · DISABLED')));
+  const run = env.current_run || env.last_run;
+  if (!run) {
+    pane.appendChild(el('div', 'empty', 'idle — no run yet'));
+    return pane;
   }
-  return wrap;
+  if (run.current_file) {
+    pane.appendChild(el('div', 'file-name', run.current_file));
+    const bar = el('div', 'progress-bar');
+    const fill = el('div', 'progress-fill');
+    const tot = run.total_pages || 0;
+    fill.style.width = (tot ? (run.current_page / tot * 100) : 0) + '%';
+    bar.appendChild(fill);
+    pane.appendChild(bar);
+  }
+  kv(pane, 'files processed', run.files_processed || 0);
+  kv(pane, 'pages uploaded', run.pages_uploaded || 0);
+  kv(pane, 'errors', (run.errors || []).length);
+  (run.errors || []).forEach(e =>
+    pane.appendChild(el('div', 'errs',
+      e.filename + (e.page_num ? ' p' + e.page_num : '') + ': ' + e.message)));
+  return pane;
 }
 
-function replaceChildren(parent, nodes) {
-  while (parent.firstChild) parent.removeChild(parent.firstChild);
-  nodes.forEach(n => parent.appendChild(n));
+function renderNtp(ntp) {
+  if (!ntp || ntp.outcome == null) { ntpEl.textContent = 'NTP …'; return; }
+  const warn = ntp.last_drift_warning;
+  ntpEl.className = warn ? 'ntp-warn' : 'ntp-ok';
+  ntpEl.textContent = 'NTP ' + ntp.source + ' offset=' +
+    (ntp.offset_seconds == null ? '?' : ntp.offset_seconds.toFixed(3)) +
+    's (' + ntp.outcome + ')' + (warn ? ' ⚠ drift' : '');
 }
 
 function refresh() {
   fetch('/status').then(r => r.json()).then(data => {
-    const active = data.active_runs || [];
-    const history = data.history || [];
-    activeCountEl.textContent = active.length ? '(' + active.length + ')' : '';
-    historyCountEl.textContent = history.length ? '(' + history.length + ')' : '';
-    if (active.length === 0) {
-      replaceChildren(activeEl, [el('div', 'empty', 'Idle — waiting for next scheduled run')]);
-    } else {
-      replaceChildren(activeEl, active.map(r => buildRun(r, true)));
-    }
-    replaceChildren(historyEl, history.map(r => buildRun(r, false)));
+    machineEl.textContent = data.machine || '?';
+    renderNtp(data.ntp);
+    const envs = data.environments || {};
+    while (panesEl.firstChild) panesEl.removeChild(panesEl.firstChild);
+    Object.keys(envs).sort().forEach(name =>
+      panesEl.appendChild(buildPane(name, envs[name])));
   });
 }
 
 refresh();
-
 const es = new EventSource('/events');
-['run_started', 'file_started', 'page_done', 'file_done', 'run_done'].forEach(t => {
-  es.addEventListener(t, () => refresh());
-});
+['run_started', 'file_started', 'page_done', 'file_done', 'run_done',
+ 'clock_sync', 'clock_drift_warning'].forEach(t =>
+  es.addEventListener(t, () => refresh()));
 es.addEventListener('heartbeat', () => {});
 </script>
 </body>

@@ -80,10 +80,15 @@ async def configured(tmp_path: Path):
     settings = _settings(tmp_path)
     state = BatchRunState(settings.machine, [e.name for e in settings.environments])
     dashboard.configure(settings, state)
-    async with AsyncClient(
-        transport=ASGITransport(app=dashboard.app), base_url="http://test"
-    ) as ac:
-        yield ac, settings, state
+    try:
+        async with AsyncClient(
+            transport=ASGITransport(app=dashboard.app), base_url="http://test"
+        ) as ac:
+            yield ac, settings, state
+    finally:
+        # Avoid module-global leakage into legacy (unconfigured) tests.
+        dashboard._settings = None
+        dashboard._run_state = None
 
 
 @pytest.mark.asyncio

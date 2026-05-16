@@ -161,7 +161,22 @@ async def manual_run(environment: str | None = None) -> JSONResponse:
             status_code=202,
         )
 
-    # Legacy no-arg path (until T028).
+    # No environment specified: fan out every enabled env concurrently.
+    if _settings is not None and _run_state is not None:
+        enabled = [e.name for e in _settings.enabled_environments]
+        run_ids = await asyncio.gather(
+            *(run_in_threadpool(_run_env_once, name) for name in enabled)
+        )
+        return JSONResponse(
+            {
+                "machine": _settings.machine.name,
+                "triggered": enabled,
+                "run_ids": dict(zip(enabled, run_ids, strict=True)),
+            },
+            status_code=202,
+        )
+
+    # Legacy no-arg path — only when the 004 runtime is not configured.
     from .batch import execute_run
 
     run_id = str(uuid.uuid4())

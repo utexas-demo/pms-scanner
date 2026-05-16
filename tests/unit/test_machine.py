@@ -72,6 +72,7 @@ def test_in_progress_dir_resolves_under_env_watch_dir(tmp_path: Path) -> None:
 
 def test_machine_identity_is_hashable_and_frozen() -> None:
     m = MachineIdentity("nuc")
-    {m}  # hashable
+    # Hashable, with __hash__/__eq__ consistent: equal instances dedupe.
+    assert {m, MachineIdentity("nuc")} == {m}
     with pytest.raises(Exception):
         m.name = "other"  # type: ignore[misc]

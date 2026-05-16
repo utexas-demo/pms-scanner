@@ -103,7 +103,10 @@ def _detect_orientation(
 def _render_page(page: fitz.Page, dpi: int = 72) -> Image.Image:
     """Render a fitz page to a PIL Image (RGB) at the given DPI."""
     zoom = dpi / 72.0
-    matrix = fitz.Matrix(zoom, zoom) if zoom != 1.0 else fitz.Identity
+    # Compare the int input, not the float zoom: dpi == 72 is the only
+    # case where zoom is exactly 1.0, so this avoids a float-equality
+    # check while preserving the Identity-matrix fast path.
+    matrix = fitz.Matrix(zoom, zoom) if dpi != 72 else fitz.Identity
     pixmap = page.get_pixmap(matrix=matrix)
     return Image.frombytes("RGB", (pixmap.width, pixmap.height), pixmap.samples)
 

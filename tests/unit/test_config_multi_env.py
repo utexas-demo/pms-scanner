@@ -174,7 +174,10 @@ def test_http_backend_rejected_even_with_former_escape_hatch(
     must NOT re-enable cleartext.
     """
     env = _base_env(str(tmp_path / "p"), str(tmp_path / "s"))
-    env["ENV_PRODUCTION__BACKEND_BASE_URL"] = "http://adg.mpsinc.io"
+    # Intentional plaintext URL: this test asserts config REJECTS it.
+    env["ENV_PRODUCTION__BACKEND_BASE_URL"] = (
+        "http://adg.mpsinc.io"  # NOSONAR: negative test - must be rejected
+    )
     env["LOG_LEVEL"] = "DEBUG"
     env["PMS_SCANNER_ALLOW_INSECURE"] = "1"
     with pytest.raises(ConfigError, match="must be https://"):

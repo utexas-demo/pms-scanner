@@ -151,3 +151,64 @@ def test_process_pdf_page_num_is_one_indexed(tmp_path):
 
     page_nums = [r[0] for r in result]
     assert page_nums == [1, 2]
+
+
+# --- coverage: TIFF path (004) + OSD-failure branch ---
+
+from pathlib import Path  # noqa: E402
+
+from PIL import Image  # noqa: E402
+
+
+def _make_tiff(path: Path, frames: int) -> None:
+    imgs = [
+        Image.new("RGB", (40, 40), color=(i * 30, i * 30, i * 30))
+        for i in range(frames)
+    ]
+    imgs[0].save(path, save_all=True, append_images=imgs[1:], format="TIFF")
+
+
+def test_process_tiff_multi_frame_no_rotation(tmp_path: Path) -> None:
+    p = tmp_path / "scan.tiff"
+    _make_tiff(p, 3)
+    with patch(
+        "pdf_processor.pytesseract.image_to_osd",
+        return_value={"rotate": 0, "orientation_conf": 9.0},
+    ):
+        from pdf_processor import process_pdf
+
+        result = process_pdf(p)
+    assert [r[0] for r in result] == [1, 2, 3]
+    assert all(r[3] == 0 and r[2] is False for r in result)
+
+
+def test_process_tiff_applies_osd_rotation(tmp_path: Path) -> None:
+    p = tmp_path / "rot.tif"
+    _make_tiff(p, 1)
+    with patch(
+        "pdf_processor.pytesseract.image_to_osd",
+        return_value={"rotate": 90, "orientation_conf": 8.0},
+    ):
+        from pdf_processor import process_pdf
+
+        result = process_pdf(p)
+    page_num, image, uncertain, rotation = result[0]
+    assert rotation == 90 and uncertain is False
+    assert isinstance(image, Image.Image)
+
+
+def test_process_tiff_osd_failure_marks_uncertain(tmp_path: Path) -> None:
+    import pytesseract
+
+    p = tmp_path / "bad.tiff"
+    _make_tiff(p, 1)
+    with patch(
+        "pdf_processor.pytesseract.image_to_osd",
+        side_effect=pytesseract.TesseractError(1, "no osd"),
+    ):
+        from pdf_processor import process_pdf
+
+        result = process_pdf(p)
+    _n, _img, uncertain, rotation = result[0]
+    assert uncertain is True
+    assert rotation == 0

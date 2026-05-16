@@ -193,3 +193,70 @@ def test_configure_services_wires_drift_events_to_dashboard(tmp_path) -> None:
     assert ev["type"] == "clock_drift_warning"
     assert ev["machine"] == "macmini"
     assert ev["outcome"] == "drift_uncorrected"
+
+
+# --- coverage: main() wiring + refuse-to-start exits ---
+
+
+def test_main_config_error_exits_1(tmp_path, monkeypatch) -> None:
+    from config import ConfigError
+
+    monkeypatch.setattr(
+        main_mod, "load_settings", lambda: (_ for _ in ()).throw(
+            ConfigError("bad ENV_PRODUCTION__WATCH_DIR")
+        )
+    )
+    with pytest.raises(SystemExit) as exc:
+        main_mod.main()
+    assert exc.value.code == 1
+
+
+def test_main_ntp_startup_error_exits_1(tmp_path, monkeypatch) -> None:
+    s = _settings(tmp_path)
+    monkeypatch.setattr(main_mod, "load_settings", lambda: s)
+
+    def boom(_settings):
+        raise NTPStartupError("offset too big")
+
+    monkeypatch.setattr(main_mod, "build_runtime", boom)
+    with pytest.raises(SystemExit) as exc:
+        main_mod.main()
+    assert exc.value.code == 1
+
+
+def test_main_happy_path_wires_loop_and_starts_services(
+    tmp_path, monkeypatch
+) -> None:
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock
+
+    import dashboard
+
+    s = _settings(tmp_path)
+    rt = main_mod.build_runtime(s, ntp_client=_FakeClient(0.0))
+    monkeypatch.setattr(main_mod, "load_settings", lambda: s)
+    monkeypatch.setattr(main_mod, "build_runtime", lambda _s: rt)
+
+    fake_sched = MagicMock()
+    monkeypatch.setattr(main_mod, "configure_services", lambda _rt: fake_sched)
+    monkeypatch.setattr(rt.drift_monitor, "start", MagicMock())
+    monkeypatch.setattr(main_mod.signal, "signal", lambda *a, **k: None)
+
+    server = MagicMock()
+    server.serve = AsyncMock(return_value=None)
+    monkeypatch.setattr(main_mod.uvicorn, "Server", lambda *_a, **_k: server)
+    monkeypatch.setattr(main_mod.uvicorn, "Config", lambda *_a, **_k: object())
+
+    try:
+        main_mod.main()
+        assert main_mod._app_state.loop is not None
+        assert isinstance(
+            main_mod._app_state.loop, asyncio.AbstractEventLoop
+        )
+        fake_sched.start.assert_called_once()
+        rt.drift_monitor.start.assert_called_once()
+        server.serve.assert_awaited_once()
+    finally:
+        main_mod._app_state.loop = None
+        dashboard._settings = None
+        dashboard._run_state = None

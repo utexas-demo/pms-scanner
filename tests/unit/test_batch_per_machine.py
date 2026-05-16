@@ -172,3 +172,97 @@ def test_recover_stranded_name_conflict_gets_suffix(tmp_path: Path) -> None:
     ]
     assert len(recovered) == 1
     assert recovered[0].read_bytes() == b"stranded"
+
+
+# --- coverage: recovery edge, run_once guard, failure/exception disposition ---
+
+from unittest.mock import patch as _patch  # noqa: E402
+
+import fitz  # noqa: E402
+
+
+def _pdf(path: Path, pages: int = 1) -> None:
+    doc = fitz.open()
+    for _ in range(pages):
+        doc.new_page(width=612, height=792)
+    doc.save(str(path))
+    doc.close()
+
+
+def _ok_post(*a, **k):
+    from unittest.mock import MagicMock
+
+    r = MagicMock()
+    r.status_code = 200
+    r.raise_for_status.return_value = None
+    r.json.return_value = {"batch_id": "b", "images": [{"original_file_name": "f"}],
+                           "rejected": []}
+    return r
+
+
+def test_recover_stranded_missing_subfolder_returns_empty(tmp_path: Path) -> None:
+    r = _runner(tmp_path)
+    import shutil
+
+    shutil.rmtree(r.env.in_progress_dir(r.machine))
+    assert r.recover_stranded() == []
+
+
+def test_recover_stranded_skips_non_supported_entries(tmp_path: Path) -> None:
+    r = _runner(tmp_path)
+    d = r.env.in_progress_dir(r.machine)
+    (d / "note.txt").write_text("nope")
+    (d / "sub").mkdir()
+    assert r.recover_stranded() == []
+    assert (d / "note.txt").exists()  # untouched
+
+
+def test_run_once_missing_watch_dir_logs_and_returns(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    import logging
+    import shutil
+
+    r = _runner(tmp_path)
+    shutil.rmtree(r.env.watch_dir)
+    with caplog.at_level(logging.ERROR, logger="scanner.batch"):
+        r.run_once()
+    assert any("missing" in rec.getMessage() for rec in caplog.records)
+
+
+def _runner0(tmp_path: Path) -> BatchRunner:
+    env = _env(tmp_path)
+    m = MachineIdentity("macmini")
+    return BatchRunner(env, m, BatchRunState(m, [env.name]), settle_seconds=0)
+
+
+def test_run_once_upload_failure_returns_file_to_watch(tmp_path: Path) -> None:
+    r = _runner0(tmp_path)
+    _pdf(r.env.watch_dir / "f.pdf", pages=1)
+
+    def fail_post(*a, **k):
+        from unittest.mock import MagicMock
+
+        resp = MagicMock()
+        resp.status_code = 500
+        from requests import HTTPError
+
+        resp.raise_for_status.side_effect = HTTPError(response=resp)
+        return resp
+
+    with _patch("uploader.requests.post", side_effect=fail_post):
+        with _patch("uploader.time.sleep"):
+            r.run_once()
+
+    assert (r.env.watch_dir / "f.pdf").is_file()  # returned for retry
+    assert not (r.env.processed_dir / "f.pdf").exists()
+    assert r.state.env("production").errors
+
+
+def test_run_once_processing_exception_marks_failed(tmp_path: Path) -> None:
+    r = _runner0(tmp_path)
+    _pdf(r.env.watch_dir / "g.pdf", pages=1)
+    with _patch("batch.process_pdf", side_effect=RuntimeError("render boom")):
+        r.run_once()
+    assert (r.env.watch_dir / "g.pdf").is_file()
+    assert r.state.env("production").errors[-1].message

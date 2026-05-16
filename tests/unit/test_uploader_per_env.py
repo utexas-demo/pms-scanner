@@ -139,3 +139,64 @@ def test_token_never_appears_in_logs(
         with patch("uploader.requests.post", return_value=_ok()):
             upload_page(env, tmp_path / "x.pdf", 1, 1, image)
     assert all("super-secret-tok" not in r.getMessage() for r in caplog.records)
+
+
+# --- coverage: rate limiter, rejected items, network exhaustion ---
+
+
+def test_rate_limiter_sleeps_when_window_full() -> None:
+    import uploader as up
+
+    slept: list[float] = []
+    with up._rate_lock:
+        up._rate_history.clear()
+        now = __import__("time").monotonic()
+        for _ in range(up._RATE_LIMIT_MAX):
+            up._rate_history.append(now)
+    with patch("uploader.time.sleep", side_effect=slept.append):
+        with patch(
+            "uploader.time.monotonic",
+            side_effect=[now, now, now + up._RATE_LIMIT_WINDOW + 1],
+        ):
+            up._rate_limit_acquire()
+    assert slept and slept[0] > 0
+    up._rate_history.clear()
+
+
+def test_rejected_items_logged_and_returns_false(
+    image: Image.Image, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    import logging
+
+    env = _env(*PROD)
+    resp = _resp(
+        200,
+        {"batch_id": "b", "images": [], "rejected": [
+            {"file_name": "x_p001.tiff", "reason": "duplicate"}]},
+    )
+    with caplog.at_level(logging.WARNING, logger="scanner.uploader"):
+        with patch("uploader.requests.post", return_value=resp):
+            ok = upload_page(env, tmp_path / "x.pdf", 1, 1, image)
+    assert ok is False
+    assert any("rejected" in r.getMessage().lower() for r in caplog.records)
+
+
+def test_network_exception_retries_then_exhausts(
+    image: Image.Image, tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    import logging
+
+    import requests as rq
+
+    env = _env(*STG)
+    with caplog.at_level(logging.ERROR, logger="scanner.uploader"):
+        with patch(
+            "uploader.requests.post",
+            side_effect=rq.ConnectionError("net down"),
+        ):
+            with patch("uploader.time.sleep"):
+                ok = upload_page(
+                    env, tmp_path / "x.pdf", 1, 1, image, max_retries=3
+                )
+    assert ok is False
+    assert any("Exhausted" in r.getMessage() for r in caplog.records)

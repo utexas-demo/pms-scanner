@@ -225,3 +225,61 @@ def test_clock_sync_event_shape() -> None:
     )
     assert ev.outcome == "ok"
     assert ev.correction_exit_code is None
+
+
+# ---------------------------------------------------------------------------
+# DriftMonitor background loop (start/stop/_loop) — coverage
+# ---------------------------------------------------------------------------
+
+
+def test_drift_monitor_loop_runs_and_stops_cleanly() -> None:
+    import threading
+    import time as _t
+
+    seen: list[ClockSyncEvent] = []
+    mon = DriftMonitor(
+        _OneShotClient(_meas(0.0)),
+        max_drift_seconds=1.0,
+        check_interval_seconds=0.05,
+        correct_clock_command=None,
+        on_event=seen.append,
+    )
+    mon.start()
+    mon.start()  # idempotent — second call is a no-op (covers early return)
+    deadline = _t.monotonic() + 3
+    while not seen and _t.monotonic() < deadline:
+        _t.sleep(0.02)
+    mon.stop()
+    assert seen  # at least one cycle ran
+    assert mon._thread is None
+    assert not any(
+        t.name == "ntp-drift-monitor" and t.is_alive()
+        for t in threading.enumerate()
+    )
+
+
+def test_drift_monitor_loop_survives_a_raising_cycle(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    import time as _t
+
+    class _Boom:
+        source = "pool.ntp.org"
+        calls = 0
+
+        def measure(self):
+            _Boom.calls += 1
+            raise RuntimeError("kaboom")
+
+    mon = DriftMonitor(
+        _Boom(),
+        max_drift_seconds=1.0,
+        check_interval_seconds=0.05,
+        correct_clock_command=None,
+    )
+    with caplog.at_level(logging.ERROR):
+        mon.start()
+        _t.sleep(0.3)
+        mon.stop()
+    assert _Boom.calls >= 1  # loop kept calling despite the exception
+    assert any("continuing" in r.getMessage() for r in caplog.records)

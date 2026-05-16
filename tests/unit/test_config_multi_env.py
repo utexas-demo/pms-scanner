@@ -5,7 +5,6 @@ data-model.md. Covers required-field absence, same-watch-folder rejection
 (FR-009), same-offset rejection (FR-006c), unknown-env rejection, derived
 in_progress_dir/processed_dir, and the 003-era flat-var migration warning.
 """
-import logging
 import os
 from contextlib import contextmanager
 from pathlib import Path
@@ -133,9 +132,10 @@ def test_api_token_is_secret_not_in_repr(tmp_path: Path) -> None:
     assert prod.api_token.get_secret_value() == "prod-token"
 
 
-def test_003_flat_vars_synthesize_production_with_warning(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture
+def test_flat_003_vars_without_environments_are_rejected(
+    tmp_path: Path,
 ) -> None:
+    """The 003 flat-var migration shim is gone (T057): no ENVIRONMENTS → error."""
     legacy = {
         "MACHINE_IDENTITY": "macmini",
         "NTP__STARTUP_REQUIRED": "false",
@@ -143,11 +143,8 @@ def test_003_flat_vars_synthesize_production_with_warning(
         "BACKEND_BASE_URL": "https://adg.mpsinc.io",
         "API_TOKEN": "legacy-token",
     }
-    with caplog.at_level(logging.WARNING):
-        s = _build(legacy)
-    assert [e.name for e in s.environments] == ["production"]
-    assert s.environments[0].watch_dir == tmp_path / "legacy"
-    assert any("migrat" in r.message.lower() for r in caplog.records)
+    with pytest.raises(ConfigError, match="(?i)ENVIRONMENTS"):
+        _build(legacy)
 
 
 def test_environments_present_ignores_legacy_flat_vars(tmp_path: Path) -> None:

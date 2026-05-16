@@ -13,7 +13,6 @@ GET  /healthz  Health check
 import asyncio
 import json
 import logging
-import threading
 import uuid
 from collections.abc import AsyncGenerator
 
@@ -134,14 +133,12 @@ async def index() -> HTMLResponse:
 
 @app.get("/status")
 async def status() -> JSONResponse:
-    """Per-(machine, env) snapshot + latest NTP record (dashboard-events.md).
-
-    Falls back to the legacy 003 shape only when the 004 runtime has not
-    been configured (keeps legacy callers/tests working in transition).
-    """
-    if _settings is not None and _run_state is not None:
-        return JSONResponse(_multi_env_status())
-    return JSONResponse(_app_state.to_status_dict())
+    """Per-(machine, env) snapshot + latest NTP record (dashboard-events.md)."""
+    if _settings is None or _run_state is None:
+        return JSONResponse(
+            {"detail": "dashboard runtime not configured"}, status_code=503
+        )
+    return JSONResponse(_multi_env_status())
 
 
 @app.get("/events")
@@ -209,18 +206,18 @@ def _run_env_once(env_name: str) -> str:
 
 @app.post("/run", status_code=202)
 async def manual_run(environment: str | None = None) -> JSONResponse:
-    """Manually trigger a run.
+    """Manually trigger a run on this machine.
 
-    With ``?environment=<name>`` (004): synchronously run that single
-    environment on this machine. Unknown env → 404. Without the param:
-    legacy single-env behavior (replaced by T028 to fan out all envs).
+    ``?environment=<name>`` runs that single env; unknown env → 404.
+    Without the param, every enabled env runs concurrently. Returns
+    202 ``{machine, triggered, run_ids}``.
     """
+    if _settings is None or _run_state is None:
+        return JSONResponse(
+            {"detail": "dashboard runtime not configured"}, status_code=503
+        )
+
     if environment is not None:
-        if _settings is None or _run_state is None:
-            return JSONResponse(
-                {"detail": "dashboard runtime not configured"},
-                status_code=503,
-            )
         names = [e.name for e in _settings.environments]
         if environment not in names:
             return JSONResponse(
@@ -232,45 +229,19 @@ async def manual_run(environment: str | None = None) -> JSONResponse:
                 },
                 status_code=404,
             )
-        run_id = await run_in_threadpool(_run_env_once, environment)
-        return JSONResponse(
-            {
-                "machine": _settings.machine.name,
-                "triggered": [environment],
-                "run_ids": {environment: run_id},
-            },
-            status_code=202,
-        )
+        targets = [environment]
+    else:
+        targets = [e.name for e in _settings.enabled_environments]
 
-    # No environment specified: fan out every enabled env concurrently.
-    if _settings is not None and _run_state is not None:
-        enabled = [e.name for e in _settings.enabled_environments]
-        run_ids = await asyncio.gather(
-            *(run_in_threadpool(_run_env_once, name) for name in enabled)
-        )
-        return JSONResponse(
-            {
-                "machine": _settings.machine.name,
-                "triggered": enabled,
-                "run_ids": dict(zip(enabled, run_ids, strict=True)),
-            },
-            status_code=202,
-        )
-
-    # Legacy no-arg path — only when the 004 runtime is not configured.
-    from .batch import execute_run
-
-    run_id = str(uuid.uuid4())
-    logger.info("Manual /run triggered — run_id=%s", run_id)
-    t = threading.Thread(
-        target=execute_run,
-        args=(_app_state,),
-        daemon=True,
-        name=f"manual-run-{run_id}",
+    run_ids = await asyncio.gather(
+        *(run_in_threadpool(_run_env_once, name) for name in targets)
     )
-    t.start()
     return JSONResponse(
-        {"run_id": run_id, "message": "Batch run queued"},
+        {
+            "machine": _settings.machine.name,
+            "triggered": targets,
+            "run_ids": dict(zip(targets, run_ids, strict=True)),
+        },
         status_code=202,
     )
 

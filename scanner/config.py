@@ -133,20 +133,7 @@ class AppSettings(BaseSettings):
     env_production: _EnvBlock | None = None
     env_staging: _EnvBlock | None = None
 
-    # 003-era flat vars (compat shim — removed in a follow-up cleanup PR).
-    legacy_watch_dir: str | None = Field(
-        default=None, validation_alias=AliasChoices("legacy_watch_dir", "watch_dir")
-    )
-    legacy_backend_base_url: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("legacy_backend_base_url", "backend_base_url"),
-    )
-    legacy_api_token: str | None = Field(
-        default=None,
-        validation_alias=AliasChoices("legacy_api_token", "api_token"),
-    )
-
-    # Shared (carried from 003).
+    # Shared.
     dashboard_port: int = 8080
     file_settle_seconds: float = 10.0
     upload_timeout_seconds: int = 30
@@ -186,22 +173,6 @@ class AppSettings(BaseSettings):
                     f"valid names are {list(_VALID_ENV_NAMES)}"
                 )
             blocks = {n: getattr(self, f"env_{n}") for n in names}
-        elif self.legacy_watch_dir and self.legacy_api_token:
-            logger.warning(
-                "003-era flat config detected (WATCH_DIR/API_TOKEN); "
-                "synthesizing a single 'production' environment. Please "
-                "migrate to ENVIRONMENTS + ENV_PRODUCTION__* — this shim "
-                "will be removed."
-            )
-            names = ["production"]
-            blocks = {
-                "production": _EnvBlock(
-                    watch_dir=Path(self.legacy_watch_dir),
-                    backend_base_url=self.legacy_backend_base_url,
-                    api_token=SecretStr(self.legacy_api_token),
-                    schedule_offset_seconds=0,
-                )
-            }
         else:
             raise ValueError(
                 "ENVIRONMENTS is required (comma-separated, e.g. "
@@ -303,44 +274,3 @@ def load_settings(*, dotenv: bool = True) -> AppSettings:
         return AppSettings(_env_file=None)  # type: ignore[call-arg]
     except ValidationError as exc:
         raise ConfigError(_format(exc)) from exc
-
-
-# ---------------------------------------------------------------------------
-# 003-era compatibility shim (single-env Settings).
-#
-# Removed once batch.py / uploader.py / __main__.py are migrated to the
-# per-environment API (tasks T018/T020/T022) — see tasks.md T057. Kept here so
-# the tree stays importable during the staged 004 refactor.
-# ---------------------------------------------------------------------------
-
-
-class Settings(BaseSettings):
-    model_config = SettingsConfigDict(
-        env_file=".env",
-        env_file_encoding="utf-8",
-        case_sensitive=False,
-        extra="ignore",
-    )
-
-    watch_dir: str = "/data/incoming"
-    file_settle_seconds: float = 10.0
-    cron_interval_seconds: int = 60
-    dashboard_port: int = 8080
-    backend_base_url: str = "https://api.example.com"
-    api_token: str = ""
-    requisition_id: UUID | None = None
-    upload_timeout_seconds: int = 30
-    upload_max_retries: int = 3
-    upload_retry_max_wait_seconds: int = 10
-    log_level: str = "INFO"
-
-    @property
-    def inprogress_dir(self) -> Path:
-        return Path(self.watch_dir) / "in-progress"
-
-    @property
-    def processed_dir(self) -> Path:
-        return Path(self.watch_dir) / "processed"
-
-
-settings = Settings()

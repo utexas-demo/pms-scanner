@@ -24,7 +24,7 @@ from pathlib import Path
 import requests
 from PIL import Image
 
-from .config import Environment, settings
+from .config import Environment
 
 logger = logging.getLogger("scanner.uploader")
 
@@ -170,102 +170,3 @@ def _encode_tiff(image: Image.Image) -> bytes:
     buf = io.BytesIO()
     image.save(buf, format="TIFF", compression="tiff_lzw")
     return buf.getvalue()
-
-
-# ---------------------------------------------------------------------------
-# 003-era single-env shim — used by the legacy batch path until T022.
-# Removed alongside the legacy Settings (tasks.md T057).
-# ---------------------------------------------------------------------------
-
-
-def _legacy_upload_page(
-    path: Path,
-    page_num: int,
-    total_pages: int,
-    image: Image.Image,
-) -> bool:
-    filename = f"{path.stem}_p{page_num:03d}.tiff"
-    url = f"{settings.backend_base_url}/api/scanned-images/upload"
-    headers = {"X-API-Key": settings.api_token}
-    form_data: dict[str, str] = {}
-    if settings.requisition_id:
-        form_data["requisition_id"] = str(settings.requisition_id)
-
-    max_attempts = settings.upload_max_retries
-    max_wait = settings.upload_retry_max_wait_seconds
-
-    for attempt in range(max_attempts):
-        image_bytes = _encode_tiff(image)
-        _rate_limit_acquire()
-        try:
-            response = requests.post(
-                url,
-                headers=headers,
-                files=[("files", (filename, image_bytes, "image/tiff"))],
-                data=form_data,
-                timeout=settings.upload_timeout_seconds,
-            )
-            response.raise_for_status()
-            body = response.json()
-            batch_id = body.get("batch_id", "?")
-            accepted = [img["original_file_name"] for img in body.get("images", [])]
-            rejected = body.get("rejected", [])
-            if accepted:
-                logger.info(
-                    "Uploaded %s (page %d/%d) → batch %s",
-                    filename,
-                    page_num,
-                    total_pages,
-                    batch_id,
-                )
-            for rej in rejected:
-                logger.warning(
-                    "Backend rejected %s in batch %s: %s",
-                    rej.get("file_name"),
-                    batch_id,
-                    rej.get("reason"),
-                )
-            return bool(accepted)
-        except requests.HTTPError as exc:
-            status = exc.response.status_code if exc.response is not None else 0
-            if status < 500:
-                logger.error(
-                    "HTTP %d uploading %s (page %d/%d): %s",
-                    status,
-                    filename,
-                    page_num,
-                    total_pages,
-                    exc,
-                )
-                return False
-            logger.warning(
-                "HTTP %d uploading %s (page %d/%d), attempt %d/%d",
-                status,
-                filename,
-                page_num,
-                total_pages,
-                attempt + 1,
-                max_attempts,
-            )
-        except requests.RequestException as exc:
-            logger.warning(
-                "Network error uploading %s (page %d/%d), attempt %d/%d: %s",
-                filename,
-                page_num,
-                total_pages,
-                attempt + 1,
-                max_attempts,
-                exc,
-            )
-        if attempt < max_attempts - 1:
-            wait_seconds = min(2**attempt, max_wait)
-            time.sleep(wait_seconds)
-
-    logger.error(
-        "Exhausted %d upload attempts for %s (page %d/%d)",
-        max_attempts,
-        filename,
-        page_num,
-        total_pages,
-    )
-    return False

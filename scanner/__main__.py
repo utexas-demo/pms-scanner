@@ -38,6 +38,7 @@ from .ntp import (
 )
 from .scheduler import Scheduler
 from .state import BatchRunState
+from .state import app_state as _app_state
 
 logger = logging.getLogger("scanner.main")
 
@@ -208,9 +209,12 @@ def main() -> None:
 
     drift_monitor = runtime.drift_monitor
 
-    # Event loop for the thread→async SSE bridge (dashboard).
+    # Event loop for the thread→async SSE bridge (dashboard). The shared
+    # event bus must point at this loop so emit_event() from scheduler /
+    # drift-monitor worker threads reaches the SSE stream.
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
+    _app_state.loop = loop
 
     scheduler = configure_services(runtime)
     scheduler.start()

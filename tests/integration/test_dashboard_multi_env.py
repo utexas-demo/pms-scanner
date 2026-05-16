@@ -64,6 +64,22 @@ async def configured(tmp_path: Path):
 
 
 @pytest.mark.asyncio
+async def test_dashboard_html_has_multi_env_markers(configured) -> None:
+    """GET / serves the two-pane, NTP-banner, per-machine layout (T049)."""
+    client, *_ = configured
+    html = (await client.get("/")).text
+    low = html.lower()
+    # Per-machine identity + NTP status banner.
+    assert "ntp" in low
+    assert 'id="machine"' in low or "machine" in low
+    # Two side-by-side env panes for production + staging.
+    assert "production" in low and "staging" in low
+    # Driven by the new /status + /events contract.
+    assert "/status" in html and "/events" in html
+    assert "backend" in low  # backend hostname shown per env
+
+
+@pytest.mark.asyncio
 async def test_status_shape(configured) -> None:
     client, settings, state, _dash = configured
     from ntp import ClockSyncEvent

@@ -154,3 +154,42 @@ def test_configure_services_recovers_stranded_before_scheduling(
         sched.stop()
         dashboard._settings = None
         dashboard._run_state = None
+
+
+def test_configure_services_wires_drift_events_to_dashboard(tmp_path) -> None:
+    """DriftMonitor outcomes are pushed onto the dashboard SSE stream (T048)."""
+    from unittest.mock import patch
+
+    import dashboard
+
+    s = _settings(tmp_path)
+    rt = main_mod.build_runtime(s, ntp_client=_FakeClient(0.0))
+    captured: list[dict] = []
+    with patch.object(
+        dashboard, "emit_clock_event", side_effect=captured.append
+    ):
+        sched = main_mod.configure_services(rt)
+        try:
+            assert rt.drift_monitor._on_event is not None
+            from ntp import ClockSyncEvent
+
+            rt.drift_monitor._on_event(
+                ClockSyncEvent(
+                    __import__("datetime").datetime.now(
+                        __import__("datetime").UTC
+                    ),
+                    "pool.ntp.org",
+                    5.0,
+                    "drift_uncorrected",
+                    1,
+                )
+            )
+        finally:
+            sched.stop()
+            dashboard._settings = None
+            dashboard._run_state = None
+    assert captured
+    ev = captured[-1]
+    assert ev["type"] == "clock_drift_warning"
+    assert ev["machine"] == "macmini"
+    assert ev["outcome"] == "drift_uncorrected"

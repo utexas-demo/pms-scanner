@@ -121,7 +121,19 @@ def build_runtime(
 
 
 def configure_services(runtime: Runtime) -> Scheduler:
-    """Wire the dashboard + build/register the per-env scheduler jobs."""
+    """Recover stranded files, wire the dashboard, register per-env jobs.
+
+    Crash recovery (FR-008) runs for every enabled env BEFORE any
+    scheduler job can fire, and only touches this machine's own
+    in-progress/<machine>/ subfolder.
+    """
+    from .batch import BatchRunner
+
+    for env in runtime.settings.enabled_environments:
+        BatchRunner(
+            env, runtime.settings.machine, runtime.state
+        ).recover_stranded()
+
     _configure_dashboard(runtime.settings, runtime.state)
     sched = Scheduler(runtime.settings, runtime.state)
     sched.register()

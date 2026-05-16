@@ -220,3 +220,36 @@ def test_logger_redacts_registered_secret(
     msg = caplog.records[-1].getMessage()
     assert "pms_supersecret_token" not in msg
     assert "***" in msg
+
+
+def test_logger_redacts_secrets(caplog: pytest.LogCaptureFixture) -> None:
+    """Environment.api_token is SecretStr and never reaches a log line (T030)."""
+    from pathlib import Path
+
+    from config import Environment
+    from pydantic import SecretStr
+
+    token = "pms_prod_DO_NOT_LEAK_4f3a"
+    env = Environment(
+        name="production",
+        watch_dir=Path("/tmp/p"),
+        backend_base_url="https://adg.mpsinc.io",
+        api_token=SecretStr(token),
+        schedule_offset_seconds=0,
+    )
+    # SecretStr never renders its value in repr/str.
+    assert isinstance(env.api_token, SecretStr)
+    assert token not in repr(env)
+    assert token not in str(env.api_token)
+
+    log = make_logger(
+        "scanner.t030",
+        machine="macmini",
+        env="production",
+        secrets=[env.api_token.get_secret_value()],
+    )
+    with caplog.at_level(logging.DEBUG, logger="scanner.t030"):
+        log.info("uploading with Authorization: Bearer %s", token)
+        log.debug("retry; token=%s", token)
+    for record in caplog.records:
+        assert token not in record.getMessage()

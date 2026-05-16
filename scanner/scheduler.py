@@ -149,3 +149,12 @@ class Scheduler:
     def stop(self) -> None:
         if self._scheduler.running:
             self._scheduler.shutdown(wait=True)
+
+    # Legacy signal-handler compatibility (__main__._shutdown).
+    def shutdown(self, wait: bool = True) -> None:
+        if self._scheduler.running:
+            self._scheduler.shutdown(wait=wait)
+
+    @property
+    def running(self) -> bool:
+        return bool(self._scheduler.running)

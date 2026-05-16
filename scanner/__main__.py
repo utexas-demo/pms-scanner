@@ -24,15 +24,10 @@ import sys
 from dataclasses import dataclass
 
 import uvicorn
-from apscheduler.executors.pool import (  # type: ignore[import-untyped,unused-ignore]
-    ThreadPoolExecutor,
-)
-from apscheduler.schedulers.background import (  # type: ignore[import-untyped,unused-ignore]
-    BackgroundScheduler,
-)
 
 from .config import AppSettings, ConfigError, load_settings
 from .dashboard import app as dashboard_app
+from .dashboard import configure as _configure_dashboard
 from .ntp import (
     ClockSyncEvent,
     DriftMonitor,
@@ -40,12 +35,13 @@ from .ntp import (
     NTPGate,
     NTPStartupError,
 )
+from .scheduler import Scheduler
 from .state import BatchRunState
 
 logger = logging.getLogger("scanner.main")
 
 # Module-level handles — set by main(), read by the signal handler.
-scheduler: BackgroundScheduler | None = None
+scheduler: Scheduler | None = None
 drift_monitor: DriftMonitor | None = None
 
 
@@ -124,6 +120,19 @@ def build_runtime(
     return Runtime(settings=settings, state=state, drift_monitor=monitor)
 
 
+def configure_services(runtime: Runtime) -> Scheduler:
+    """Wire the dashboard + build/register the per-env scheduler jobs."""
+    _configure_dashboard(runtime.settings, runtime.state)
+    sched = Scheduler(runtime.settings, runtime.state)
+    sched.register()
+    logger.info(
+        "Registered %d per-env scheduler job(s) for machine=%s",
+        len(runtime.settings.enabled_environments),
+        runtime.settings.machine.name,
+    )
+    return sched
+
+
 def _shutdown(signum: int, frame: object) -> None:  # noqa: ARG001
     """SIGTERM/SIGINT: drain scheduler + drift monitor, then exit."""
     sig_name = signal.Signals(signum).name
@@ -168,11 +177,9 @@ def main() -> None:
     loop = asyncio.new_event_loop()
     asyncio.set_event_loop(loop)
 
-    # Scheduler placeholder — per-env CronTrigger jobs wired in T032/T035.
-    executors = {"default": ThreadPoolExecutor(max_workers=4)}
-    scheduler = BackgroundScheduler(executors=executors)
+    scheduler = configure_services(runtime)
     scheduler.start()
-    logger.info("Scheduler started (no per-env jobs registered yet)")
+    logger.info("Scheduler started — per-env jobs registered")
 
     drift_monitor.start()
     logger.info(

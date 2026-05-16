@@ -46,6 +46,81 @@ def configure(settings: AppSettings, state: BatchRunState) -> None:
     _settings = settings
     _run_state = state
 
+
+def emit_clock_event(event: dict[str, object]) -> None:
+    """Push a clock_sync / clock_drift_warning event onto the SSE stream."""
+    _app_state.emit_event(event)
+
+
+def _per_env_run(state: BatchRunState, name: str) -> dict[str, object] | None:
+    st = state.env(name)
+    if st.last_run_started_at is None:
+        return None
+    return {
+        "environment": name,
+        "current_file": st.current_file,
+        "current_page": st.current_page,
+        "total_pages": st.total_pages,
+        "files_processed": st.files_processed,
+        "pages_uploaded": st.pages_uploaded,
+        "errors": [
+            {
+                "filename": e.filename,
+                "message": e.message,
+                "page_num": e.page_num,
+                "at": e.at.isoformat(),
+            }
+            for e in st.errors
+        ],
+        "started_at": st.last_run_started_at.isoformat(),
+        "finished_at": (
+            st.last_run_finished_at.isoformat()
+            if st.last_run_finished_at
+            else None
+        ),
+    }
+
+
+def _multi_env_status() -> dict[str, object]:
+    assert _settings is not None and _run_state is not None
+    sync = _run_state.recent_clock_sync
+    warn = _run_state.last_drift_warning
+    environments: dict[str, object] = {}
+    for env in _settings.environments:
+        st = _run_state.env(env.name)
+        active = st.current_file is not None
+        run = _per_env_run(_run_state, env.name)
+        environments[env.name] = {
+            "enabled": env.enabled,
+            "schedule_offset_seconds": env.schedule_offset_seconds,
+            "backend_base_url": env.backend_base_url,
+            "current_run": run if active else None,
+            "last_run": run if not active else None,
+        }
+    return {
+        "machine": _settings.machine.name,
+        "ntp": {
+            "source": sync.source if sync else _settings.ntp.source,
+            "last_measured_at": (
+                sync.measured_at.isoformat() if sync else None
+            ),
+            "offset_seconds": sync.offset_seconds if sync else None,
+            "outcome": sync.outcome if sync else None,
+            "last_drift_warning": (
+                {
+                    "source": warn.source,
+                    "offset_seconds": warn.offset_seconds,
+                    "outcome": warn.outcome,
+                    "correction_exit_code": warn.correction_exit_code,
+                    "measured_at": warn.measured_at.isoformat(),
+                }
+                if warn
+                else None
+            ),
+        },
+        "environments": environments,
+    }
+
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
@@ -59,7 +134,13 @@ async def index() -> HTMLResponse:
 
 @app.get("/status")
 async def status() -> JSONResponse:
-    """Return a JSON snapshot of the current and last run."""
+    """Per-(machine, env) snapshot + latest NTP record (dashboard-events.md).
+
+    Falls back to the legacy 003 shape only when the 004 runtime has not
+    been configured (keeps legacy callers/tests working in transition).
+    """
+    if _settings is not None and _run_state is not None:
+        return JSONResponse(_multi_env_status())
     return JSONResponse(_app_state.to_status_dict())
 
 

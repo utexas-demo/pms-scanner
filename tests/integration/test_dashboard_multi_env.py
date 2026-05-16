@@ -57,6 +57,10 @@ async def configured(tmp_path: Path):
     finally:
         dashboard._settings = None
         dashboard._run_state = None
+        # Restore the shared AppState so loop/queue rebinding here does not
+        # leak a dead-loop queue into legacy (unconfigured) SSE tests.
+        dashboard._app_state.loop = None
+        dashboard._app_state.event_queue = asyncio.Queue()
 
 
 @pytest.mark.asyncio
@@ -93,37 +97,20 @@ async def test_status_shape(configured) -> None:
 
 @pytest.mark.asyncio
 async def test_sse_events_tagged(configured) -> None:
-    client, settings, state, dash = configured
+    """Every run/page/file SSE event carries env+machine; clock_sync arrives.
 
-    async def read_events(n: int) -> list[dict]:
-        events: list[dict] = []
-        async with client.stream("GET", "/events") as resp:
-            data_lines: list[str] = []
-            async for line in resp.aiter_lines():
-                if line.startswith("data:"):
-                    data_lines.append(line[5:].strip())
-                elif line == "" and data_lines:
-                    payload = data_lines[-1]
-                    data_lines = []
-                    try:
-                        ev = json.loads(payload)
-                    except json.JSONDecodeError:
-                        continue
-                    if ev:
-                        events.append(ev)
-                        if len(events) >= n:
-                            return events
-        return events
+    Uses a raw ASGI drive (httpx buffers infinite SSE streams). Events are
+    queued on THIS running loop's queue first; emit_clock_event is exercised
+    for the clock_sync path.
+    """
+    _client, _settings, _state, dash = configured
+    dash._app_state.loop = asyncio.get_running_loop()
+    dash._app_state.event_queue = asyncio.Queue()
 
-    task = asyncio.create_task(read_events(4))
-    await asyncio.sleep(0.2)
-
-    # Synthetic per-page events (as a BatchRunner would emit them).
     for et in ("run_started", "page_done", "file_done", "run_done"):
-        dash._app_state.emit_event(
+        await dash._app_state.event_queue.put(
             {"type": et, "env": "production", "machine": "macmini"}
         )
-    # One NTP cycle → clock_sync event.
     dash.emit_clock_event(
         {
             "type": "clock_sync",
@@ -134,13 +121,49 @@ async def test_sse_events_tagged(configured) -> None:
         }
     )
 
-    events = await asyncio.wait_for(task, timeout=5)
+    scope = {
+        "type": "http",
+        "asgi": {"version": "3.0"},
+        "http_version": "1.1",
+        "method": "GET",
+        "path": "/events",
+        "query_string": b"",
+        "root_path": "",
+        "headers": [],
+    }
+    body = bytearray()
+
+    async def receive() -> dict:
+        await asyncio.sleep(0.6)
+        return {"type": "http.disconnect"}
+
+    async def send(message: dict) -> None:
+        if message["type"] == "http.response.body":
+            body.extend(message.get("body", b""))
+
+    try:
+        await asyncio.wait_for(dash.app(scope, receive, send), timeout=3.0)
+    except (TimeoutError, asyncio.CancelledError):
+        pass
+
+    events: list[dict] = []
+    for frame in body.decode().split("\n\n"):
+        for line in frame.splitlines():
+            if line.startswith("data:"):
+                try:
+                    ev = json.loads(line[5:].strip())
+                except json.JSONDecodeError:
+                    continue
+                if ev:
+                    events.append(ev)
+
     tagged = {
         e["type"]: e
         for e in events
         if e.get("type")
         in {"run_started", "page_done", "file_done", "run_done"}
     }
+    assert set(tagged) == {"run_started", "page_done", "file_done", "run_done"}
     for et, ev in tagged.items():
         assert ev["env"] == "production", et
         assert ev["machine"] == "macmini", et

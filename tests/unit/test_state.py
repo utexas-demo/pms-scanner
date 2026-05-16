@@ -127,17 +127,17 @@ def test_logger_redacts_registered_secret(
     assert "***" in msg
 
 
-def test_logger_redacts_secrets(caplog: pytest.LogCaptureFixture) -> None:
+def test_logger_redacts_secrets(
+    caplog: pytest.LogCaptureFixture, tmp_path
+) -> None:
     """Environment.api_token is SecretStr and never reaches a log line (T030)."""
-    from pathlib import Path
-
     from config import Environment
     from pydantic import SecretStr
 
     token = "pms_prod_DO_NOT_LEAK_4f3a"
     env = Environment(
         name="production",
-        watch_dir=Path("/tmp/p"),
+        watch_dir=tmp_path / "p",
         backend_base_url="https://adg.mpsinc.io",
         api_token=SecretStr(token),
         schedule_offset_seconds=0,

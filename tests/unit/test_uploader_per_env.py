@@ -25,10 +25,12 @@ def image() -> Image.Image:
     return Image.new("RGB", (60, 60), color=(10, 20, 30))
 
 
-def _env(name: str, url: str, token: str, *, req_id=None) -> Environment:
+def _env(
+    name: str, url: str, token: str, *, req_id=None, tmp_path: Path
+) -> Environment:
     return Environment(
         name=name,  # type: ignore[arg-type]
-        watch_dir=Path("/tmp") / name,
+        watch_dir=tmp_path / name,
         backend_base_url=url,
         api_token=SecretStr(token),
         requisition_id=req_id,
@@ -63,7 +65,7 @@ STG = ("staging", "https://dev.adg.mpsinc.io", "stg-token-ABC")
 def test_posts_to_env_url_with_api_key(
     name: str, url: str, token: str, image: Image.Image, tmp_path: Path
 ) -> None:
-    env = _env(name, url, token)
+    env = _env(name, url, token, tmp_path=tmp_path)
     with patch("uploader.requests.post", return_value=_ok()) as post:
         ok = upload_page(env, tmp_path / "scan.pdf", 1, 3, image)
     assert ok is True
@@ -75,7 +77,9 @@ def test_posts_to_env_url_with_api_key(
 
 
 def test_no_hardcoded_host_anywhere(image: Image.Image, tmp_path: Path) -> None:
-    env = _env("staging", "https://sentinel.example.invalid", "tok")
+    env = _env(
+        "staging", "https://sentinel.example.invalid", "tok", tmp_path=tmp_path
+    )
     with patch("uploader.requests.post", return_value=_ok()) as post:
         upload_page(env, tmp_path / "x.pdf", 2, 2, image)
     url = post.call_args.args[0] if post.call_args.args else post.call_args.kwargs["url"]
@@ -85,7 +89,7 @@ def test_no_hardcoded_host_anywhere(image: Image.Image, tmp_path: Path) -> None:
 def test_filename_convention_and_page_number(
     image: Image.Image, tmp_path: Path
 ) -> None:
-    env = _env(*PROD)
+    env = _env(*PROD, tmp_path=tmp_path)
     with patch("uploader.requests.post", return_value=_ok()) as post:
         upload_page(env, tmp_path / "scan_2026.pdf", 7, 33, image)
     files = post.call_args.kwargs["files"]
@@ -97,7 +101,9 @@ def test_requisition_id_sent_when_present(
     image: Image.Image, tmp_path: Path
 ) -> None:
     rid = uuid4()
-    env = _env("production", "https://adg.mpsinc.io", "t", req_id=rid)
+    env = _env(
+        "production", "https://adg.mpsinc.io", "t", req_id=rid, tmp_path=tmp_path
+    )
     with patch("uploader.requests.post", return_value=_ok()) as post:
         upload_page(env, tmp_path / "x.pdf", 1, 1, image)
     data = post.call_args.kwargs["data"]
@@ -107,14 +113,14 @@ def test_requisition_id_sent_when_present(
 def test_no_requisition_id_field_when_absent(
     image: Image.Image, tmp_path: Path
 ) -> None:
-    env = _env(*PROD)
+    env = _env(*PROD, tmp_path=tmp_path)
     with patch("uploader.requests.post", return_value=_ok()) as post:
         upload_page(env, tmp_path / "x.pdf", 1, 1, image)
     assert "requisition_id" not in post.call_args.kwargs["data"]
 
 
 def test_4xx_returns_false_no_retry(image: Image.Image, tmp_path: Path) -> None:
-    env = _env(*PROD)
+    env = _env(*PROD, tmp_path=tmp_path)
     with patch(
         "uploader.requests.post", return_value=_resp(403, {})
     ) as post:
@@ -124,7 +130,7 @@ def test_4xx_returns_false_no_retry(image: Image.Image, tmp_path: Path) -> None:
 
 
 def test_5xx_retried_then_succeeds(image: Image.Image, tmp_path: Path) -> None:
-    env = _env(*STG)
+    env = _env(*STG, tmp_path=tmp_path)
     seq = [_resp(503, {}), _ok()]
     with patch("uploader.requests.post", side_effect=seq):
         with patch("uploader.time.sleep"):
@@ -137,7 +143,9 @@ def test_5xx_retried_then_succeeds(image: Image.Image, tmp_path: Path) -> None:
 def test_token_never_appears_in_logs(
     image: Image.Image, tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    env = _env("production", "https://adg.mpsinc.io", "super-secret-tok")
+    env = _env(
+        "production", "https://adg.mpsinc.io", "super-secret-tok", tmp_path=tmp_path
+    )
     import logging
 
     with caplog.at_level(logging.DEBUG):
@@ -173,7 +181,7 @@ def test_rejected_items_logged_and_returns_false(
 ) -> None:
     import logging
 
-    env = _env(*PROD)
+    env = _env(*PROD, tmp_path=tmp_path)
     resp = _resp(
         200,
         {"batch_id": "b", "images": [], "rejected": [
@@ -193,7 +201,7 @@ def test_network_exception_retries_then_exhausts(
 
     import requests as rq
 
-    env = _env(*STG)
+    env = _env(*STG, tmp_path=tmp_path)
     with caplog.at_level(logging.ERROR, logger="scanner.uploader"):
         with patch(
             "uploader.requests.post",

@@ -71,10 +71,10 @@ _ENVS = [
 ]
 
 
-def _env(name: str, url: str, token: str) -> Environment:
+def _env(name: str, url: str, token: str, *, tmp_path: Path) -> Environment:
     return Environment(
         name=name,  # type: ignore[arg-type]
-        watch_dir=Path("/tmp") / name,
+        watch_dir=tmp_path / name,
         backend_base_url=url,
         api_token=SecretStr(token),
         schedule_offset_seconds=0,
@@ -97,7 +97,7 @@ def _ok() -> MagicMock:
 def test_request_shape_identical_across_envs(
     name: str, url: str, token: str, tmp_path: Path
 ) -> None:
-    env = _env(name, url, token)
+    env = _env(name, url, token, tmp_path=tmp_path)
     img = Image.new("RGB", (40, 40), color=(1, 2, 3))
     with patch("uploader.requests.post", return_value=_ok()) as post:
         assert upload_page(env, tmp_path / "scan.pdf", 1, 2, img) is True
